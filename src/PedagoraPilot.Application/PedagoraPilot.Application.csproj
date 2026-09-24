@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\PedagoraPilot.Domain\PedagoraPilot.Domain.csproj" />
+    <ProjectReference Include="..\PedagoraPilot.Contracts\PedagoraPilot.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DomainRelay" />
+    <PackageReference Include="DomainRelay.Abstractions" />
+    <PackageReference Include="DomainRelay.DependencyInjection" />
+    <PackageReference Include="DomainRelay.Diagnostics" />
+    <PackageReference Include="DomainRelay.Validation" />
+    <PackageReference Include="DomainRelay.Mapping" />
+    <PackageReference Include="DomainRelay.Mapping.Abstractions" />
+    <PackageReference Include="DomainRelay.Mapping.DependencyInjection" />
+    <PackageReference Include="FluentValidation" />
+  </ItemGroup>
+</Project>

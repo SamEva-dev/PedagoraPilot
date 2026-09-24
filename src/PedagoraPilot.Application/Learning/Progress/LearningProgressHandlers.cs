@@ -1,0 +1,187 @@
+using DomainRelay.Abstractions;
+using DomainRelay.Mapping.Abstractions.Services;
+using Microsoft.EntityFrameworkCore;
+using PedagoraPilot.Application.Abstractions.Persistence;
+using PedagoraPilot.Application.Common.Errors;
+using PedagoraPilot.Application.Mapping;
+using PedagoraPilot.Contracts.Learning;
+using PedagoraPilot.Domain.Identifiers;
+using PedagoraPilot.Domain.Learning;
+
+namespace PedagoraPilot.Application.Learning.Progress;
+internal static class LearningProgressDtoFactory
+{
+    public static CompetencyDefinitionDto Definition(CompetencyDefinition x, IObjectMapper mapper)
+    {
+        var m = mapper.Map<CompetencyDefinition, CompetencyDefinitionReadModel>(x);
+        return new(m.Id.Value, m.ReferentialVersionId, m.ParentId?.Value, m.Code, m.Title, m.Kind.ToString().ToLowerInvariant(), m.SortOrder, m.Active);
+    }
+
+    public static LearnerCompetencyDto Competency(LearnerCompetencyRecord x, CompetencyDefinition d, IObjectMapper mapper)
+    {
+        var m = mapper.Map<LearnerCompetencyRecord, LearnerCompetencyRecordReadModel>(x);
+        return new(m.Id.Value, m.EnrollmentId.Value, m.CompetencyDefinitionId.Value, d.Code, d.Title, LevelCode(m.Level), m.Score, m.Comment, m.EvaluatorDisplayName, m.EvaluatedAtUtc);
+    }
+
+    public static PedagogicalTopicDto Topic(PedagogicalTopic x, IObjectMapper mapper)
+    {
+        var m = mapper.Map<PedagogicalTopic, PedagogicalTopicReadModel>(x);
+        return new(m.Id.Value, m.ReferentialVersionId, m.Code, m.Number, m.Title, m.Category, m.DurationMinutes, m.Reference, m.Active);
+    }
+
+    public static LearnerTopicProgressDto TopicProgress(LearnerTopicProgress p, PedagogicalTopic t, IObjectMapper mapper)
+    {
+        var m = mapper.Map<LearnerTopicProgress, LearnerTopicProgressReadModel>(p);
+        return new(m.Id.Value, m.EnrollmentId.Value, m.TopicId.Value, t.Code, t.Number, t.Title, t.Category, TopicStatusCode(m.Status), m.PreparationDate, m.PresentationDate, m.PresentationDurationMinutes, m.EvaluatorDisplayName, m.Comment);
+    }
+
+    public static DrivingEvaluationDto Driving(DrivingEvaluation x, IObjectMapper mapper)
+    {
+        var m = mapper.Map<DrivingEvaluation, DrivingEvaluationReadModel>(x);
+        return new(m.Id.Value, m.EnrollmentId.Value, m.CompetencyDefinitionId.Value, m.TrainingSessionId?.Value, m.EvaluatedAtUtc, m.TrainerAuthGateUserId, m.TrainerDisplayName, m.Subject, m.Positive, m.Difficulty, m.NextGoal, m.FreeObservation, x.Criteria.Select(c => new DrivingCriterionDto(c.Id.Value, c.Code, c.Label, LevelCode(c.Level))).ToArray());
+    }
+
+    public static string LevelCode(CompetencyLevel level) => level switch
+    {
+        CompetencyLevel.NotAssessed => "not_assessed",
+        CompetencyLevel.InProgress => "in_progress",
+        CompetencyLevel.Rework => "rework",
+        CompetencyLevel.Acquired => "acquired",
+        _ => "not_assessed"
+    };
+    public static string TopicStatusCode(TopicProgressStatus status) => status switch
+    {
+        TopicProgressStatus.NotStarted => "not_started",
+        TopicProgressStatus.InProgress => "in_progress",
+        TopicProgressStatus.Ready => "ready",
+        TopicProgressStatus.Presented => "presented",
+        TopicProgressStatus.Validated => "validated",
+        TopicProgressStatus.Rework => "rework",
+        _ => "not_started"
+    };
+    public static bool TryParseLevel(string value, out CompetencyLevel level) => Enum.TryParse((value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out level);
+    public static bool TryParseTopicStatus(string value, out TopicProgressStatus status) => Enum.TryParse((value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out status);
+}
+
+public sealed class GetCompetencyDefinitionsQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper) : IRequestHandler<GetCompetencyDefinitionsQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
+{
+    public async Task<IReadOnlyCollection<CompetencyDefinitionDto>> Handle(GetCompetencyDefinitionsQuery r, CancellationToken ct) => (await definitions.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Definition(x, mapper)).ToArray();
+}
+
+public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IObjectMapper mapper) : IRequestHandler<GetLearnerCompetenciesQuery, IReadOnlyCollection<LearnerCompetencyDto>>
+{
+    public async Task<IReadOnlyCollection<LearnerCompetencyDto>> Handle(GetLearnerCompetenciesQuery r, CancellationToken ct)
+    {
+        var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        var defs = await definitions.Query(false).Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId && x.Active).OrderBy(x => x.SortOrder).ToListAsync(ct);
+        var rows = await records.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).ToListAsync(ct);
+        return defs.Select(d =>
+        {
+            var row = rows.FirstOrDefault(x => x.CompetencyDefinitionId == d.Id);
+            return row is null ? new LearnerCompetencyDto(Guid.Empty, enrollment.Id.Value, d.Id.Value, d.Code, d.Title, LearningProgressDtoFactory.LevelCode(CompetencyLevel.NotAssessed), null, null, null, null) : LearningProgressDtoFactory.Competency(row, d, mapper);
+        }).ToArray();
+    }
+}
+
+public sealed class EvaluateCompetencyCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IObjectMapper mapper) : IRequestHandler<EvaluateCompetencyCommand, LearnerCompetencyDto>
+{
+    public async Task<LearnerCompetencyDto> Handle(EvaluateCompetencyCommand r, CancellationToken ct)
+    {
+        var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        var definition = await definitions.GetByIdAsync(r.CompetencyDefinitionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
+        if (definition.ReferentialVersionId != cohort.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
+        if (!LearningProgressDtoFactory.TryParseLevel(r.Level, out var level))
+            throw new ValidationApplicationException(ErrorKeys.CompetencyLevelInvalid);
+        var record = await records.FindAsync(r.EnrollmentId, r.CompetencyDefinitionId, true, ct);
+        if (record is null)
+        {
+            record = LearnerCompetencyRecord.Create(enrollment.OrganizationId, enrollment.Id, definition.Id);
+            await records.AddAsync(record, ct);
+        }
+
+        record.Evaluate(level, r.Score, r.Comment, r.EvaluatorAuthGateUserId, r.EvaluatorDisplayName, r.EvaluatedAtUtc ?? DateTimeOffset.UtcNow);
+        return LearningProgressDtoFactory.Competency(record, definition, mapper);
+    }
+}
+
+public sealed class GetPedagogicalTopicsQueryHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper) : IRequestHandler<GetPedagogicalTopicsQuery, IReadOnlyCollection<PedagogicalTopicDto>>
+{
+    public async Task<IReadOnlyCollection<PedagogicalTopicDto>> Handle(GetPedagogicalTopicsQuery r, CancellationToken ct) => (await topics.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).OrderBy(x => x.Number).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Topic(x, mapper)).ToArray();
+}
+
+public sealed class GetLearnerTopicsQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, IObjectMapper mapper) : IRequestHandler<GetLearnerTopicsQuery, IReadOnlyCollection<LearnerTopicProgressDto>>
+{
+    public async Task<IReadOnlyCollection<LearnerTopicProgressDto>> Handle(GetLearnerTopicsQuery r, CancellationToken ct)
+    {
+        var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        var topicRows = await topics.Query(false).Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId && x.Active).OrderBy(x => x.Number).ToListAsync(ct);
+        var saved = await progress.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).ToListAsync(ct);
+        return topicRows.Select(t =>
+        {
+            var p = saved.FirstOrDefault(x => x.TopicId == t.Id);
+            return p is null ? new LearnerTopicProgressDto(Guid.Empty, enrollment.Id.Value, t.Id.Value, t.Code, t.Number, t.Title, t.Category, LearningProgressDtoFactory.TopicStatusCode(TopicProgressStatus.NotStarted), null, null, null, null, null) : LearningProgressDtoFactory.TopicProgress(p, t, mapper);
+        }).ToArray();
+    }
+}
+
+public sealed class UpdateTopicProgressCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, IObjectMapper mapper) : IRequestHandler<UpdateTopicProgressCommand, LearnerTopicProgressDto>
+{
+    public async Task<LearnerTopicProgressDto> Handle(UpdateTopicProgressCommand r, CancellationToken ct)
+    {
+        var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        var topic = await topics.GetByIdAsync(r.TopicId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PedagogicalTopicNotFound);
+        if (topic.ReferentialVersionId != cohort.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.TopicReferentialMismatch);
+        if (!LearningProgressDtoFactory.TryParseTopicStatus(r.Status, out var status))
+            throw new ValidationApplicationException(ErrorKeys.TopicStatusInvalid);
+        var entity = await progress.FindAsync(r.EnrollmentId, r.TopicId, true, ct);
+        if (entity is null)
+        {
+            entity = LearnerTopicProgress.Create(enrollment.OrganizationId, enrollment.Id, topic.Id);
+            await progress.AddAsync(entity, ct);
+        }
+
+        entity.Update(status, r.PreparationDate, r.PresentationDate, r.PresentationDurationMinutes, r.EvaluatorDisplayName, r.Comment);
+        return LearningProgressDtoFactory.TopicProgress(entity, topic, mapper);
+    }
+}
+
+public sealed class GetDrivingEvaluationsQueryHandler(IDrivingEvaluationRepository evaluations, IObjectMapper mapper) : IRequestHandler<GetDrivingEvaluationsQuery, IReadOnlyCollection<DrivingEvaluationDto>>
+{
+    public async Task<IReadOnlyCollection<DrivingEvaluationDto>> Handle(GetDrivingEvaluationsQuery r, CancellationToken ct) => (await evaluations.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).Include(x => x.Criteria).OrderByDescending(x => x.EvaluatedAtUtc).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Driving(x, mapper)).ToArray();
+}
+
+public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, IObjectMapper mapper) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
+{
+    public async Task<DrivingEvaluationDto> Handle(RecordDrivingEvaluationCommand r, CancellationToken ct)
+    {
+        var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        var definition = await definitions.GetByIdAsync(r.CompetencyDefinitionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
+        if (definition.ReferentialVersionId != cohort.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
+        if (r.TrainingSessionId.HasValue)
+        {
+            var s = await sessions.GetByIdAsync(r.TrainingSessionId.Value, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
+            if (s.CohortId != enrollment.CohortId)
+                throw new ConflictApplicationException(ErrorKeys.DrivingSessionCohortMismatch);
+        }
+
+        var criteria = new List<(string, string, CompetencyLevel)>();
+        foreach (var c in r.Criteria)
+        {
+            if (!LearningProgressDtoFactory.TryParseLevel(c.Level, out var level))
+                throw new ValidationApplicationException(ErrorKeys.CompetencyLevelInvalid);
+            criteria.Add((c.Code, c.Label, level));
+        }
+
+        var entity = DrivingEvaluation.Create(enrollment.OrganizationId, enrollment.Id, definition.Id, r.TrainingSessionId, r.EvaluatedAtUtc, r.TrainerAuthGateUserId, r.TrainerDisplayName, r.Subject, r.Positive, r.Difficulty, r.NextGoal, r.FreeObservation, criteria);
+        await evaluations.AddAsync(entity, ct);
+        return LearningProgressDtoFactory.Driving(entity, mapper);
+    }
+}

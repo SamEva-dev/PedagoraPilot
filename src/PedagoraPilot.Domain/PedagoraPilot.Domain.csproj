@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="DomainRelay.Abstractions" />
+    <PackageReference Include="DomainRelay.EFCore" />
+  </ItemGroup>
+</Project>

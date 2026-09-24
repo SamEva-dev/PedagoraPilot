@@ -1,0 +1,13 @@
+namespace PedagoraPilot.Contracts.Certification;
+public sealed record CertificationUnitDto(Guid Id, string Code, string Title, int SortOrder);
+public sealed record CertificationStepDto(Guid Id, Guid? UnitId, string Code, string Title, string Kind, int DurationMinutes, int SortOrder);
+public sealed record CertificationSchemeDto(Guid Id, Guid ReferentialVersionId, string Code, string Name, string Status, DateOnly? EffectiveFrom, DateOnly? EffectiveTo, IReadOnlyCollection<CertificationUnitDto> Units, IReadOnlyCollection<CertificationStepDto> Steps);
+public sealed record CertificationExamSessionDto(Guid Id, Guid OrganizationId, Guid SiteId, Guid CohortId, Guid SchemeId, string Title, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string? Venue, string Status);
+public sealed record CertificationAssessmentDto(Guid Id, Guid StepDefinitionId, string JuryDisplayName, string Outcome, decimal? Score, string? Comment, DateTimeOffset RecordedAtUtc);
+public sealed record CertificationCandidateDto(Guid Id, Guid ExamSessionId, Guid EnrollmentId, string Status, bool? Eligible, string Decision, string? DecisionComment, DateTime? DecisionAtUtc, IReadOnlyCollection<CertificationAssessmentDto> Assessments);
+public sealed record JuryAssignmentDto(Guid Id, Guid ExamSessionId, Guid AuthGateUserId, string DisplayName, string Role, DateTimeOffset AssignedAtUtc);
+public sealed record CreateCertificationExamSessionRequest(Guid CohortId, Guid SchemeId, string Title, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string? Venue);
+public sealed record AssignJuryRequest(Guid AuthGateUserId, string DisplayName, string Role);
+public sealed record EvaluateEligibilityRequest(bool Eligible, IReadOnlyCollection<string>? Blockers);
+public sealed record RecordCertificationAssessmentRequest(Guid StepDefinitionId, string JuryDisplayName, string Outcome, decimal? Score, string? Comment);
+public sealed record RecordCertificationDecisionRequest(string Decision, string? Comment);

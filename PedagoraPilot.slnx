@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PedagoraPilot.Api/PedagoraPilot.Api.csproj" />
+    <Project Path="src/PedagoraPilot.Application/PedagoraPilot.Application.csproj" />
+    <Project Path="src/PedagoraPilot.Contracts/PedagoraPilot.Contracts.csproj" />
+    <Project Path="src/PedagoraPilot.Domain/PedagoraPilot.Domain.csproj" />
+    <Project Path="src/PedagoraPilot.Infrastructure/PedagoraPilot.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PedagoraPilot.Application.UnitTests/PedagoraPilot.Application.UnitTests.csproj" Id="bab72d64-29fe-48d5-8862-5568857e581e" />
+    <Project Path="tests/PedagoraPilot.Domain.UnitTests/PedagoraPilot.Domain.UnitTests.csproj" Id="d9667738-68a8-4059-b9f1-0d82dde72730" />
+    <Project Path="tests/PedagoraPilot.Api.UnitTests/PedagoraPilot.Api.UnitTests.csproj" Id="7d0868b8-2f98-42f0-bdc6-0ad5816aae34" />
+    <Project Path="tests/PedagoraPilot.ArchitectureTests/PedagoraPilot.ArchitectureTests.csproj" />
+    <Project Path="tests/PedagoraPilot.IntegrationTests/PedagoraPilot.IntegrationTests.csproj" Id="7d023b9a-823f-4248-9cfd-ae21303955dc" />
+  </Folder>
+</Solution>

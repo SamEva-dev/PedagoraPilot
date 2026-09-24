@@ -1,0 +1,12 @@
+namespace PedagoraPilot.Contracts.Workplace;
+public sealed record WorkplaceActivityDto(Guid Id, Guid DefinitionId, string Code, string Title, string? LabelKey, bool Mandatory, string Status, string? Comment);
+public sealed record WorkplaceDocumentDto(Guid Id, Guid RequirementId, string Code, string Title, string? LabelKey, bool Mandatory, string Status, Guid? DocumentId);
+public sealed record WorkplaceEvaluationDto(Guid Id, string Kind, string EvaluatorDisplayName, DateTimeOffset EvaluatedAtUtc, string Summary, string? Strengths, string? ImprovementAreas, bool? Validated);
+public sealed record WorkplacePeriodDto(Guid Id, Guid EnrollmentId, Guid CohortId, Guid ReferentialVersionId, string PeriodTypeCode, string LearnerDisplayName, string? LearnerExternalKey, string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, decimal CompletedHours, string Status, bool AgreementReceived, bool TrainerVisible, string? Notes, string? TutorObservation, IReadOnlyCollection<WorkplaceActivityDto> Activities, IReadOnlyCollection<WorkplaceDocumentDto> Documents, IReadOnlyCollection<WorkplaceEvaluationDto> Evaluations);
+public sealed record CreateWorkplacePeriodRequest(Guid EnrollmentId, string PeriodTypeCode, string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, bool AgreementReceived, string? Notes);
+public sealed record UpdateWorkplacePeriodRequest(string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, bool TrainerVisible, string? Notes);
+public sealed record UpdateWorkplaceHoursRequest(decimal CompletedHours, string? TutorObservation);
+public sealed record UpdateWorkplaceActivityRequest(string Status, string? Comment);
+public sealed record UpdateWorkplaceDocumentRequest(string Status, Guid? DocumentId);
+public sealed record RecordWorkplaceEvaluationRequest(string Kind, string EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc, string Summary, string? Strengths, string? ImprovementAreas, bool? Validated);
+public sealed record WorkplaceRequirementDto(Guid Id, string Code, string Title, string? LabelKey, bool Mandatory, int SortOrder, string Kind);

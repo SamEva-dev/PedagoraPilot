@@ -1,0 +1,12 @@
+namespace PedagoraPilot.Contracts.DistanceLearning;
+public sealed record DistanceParticipantDto(Guid Id, Guid EnrollmentId, string DisplayName, string Attendance, DateTimeOffset? ConnectedAtUtc, DateTimeOffset? DisconnectedAtUtc, int ConnectedMinutes, int ParticipationPercent, int CompletedActivities, int ActivityCount);
+public sealed record DistanceLearningSessionDto(Guid Id, Guid OrganizationId, Guid SiteId, Guid ProgramId, Guid CohortId, string Title, string TrainerDisplayName, string? TrainerEmail, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string Platform, string JoinUrl, string? Objectives, string Status, IReadOnlyCollection<DistanceParticipantDto> Participants);
+public sealed record CreateDistanceLearningSessionRequest(Guid SiteId, Guid ProgramId, Guid CohortId, string Title, string TrainerDisplayName, string? TrainerEmail, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string Platform, string JoinUrl, string? Objectives);
+public sealed record AddDistanceParticipantRequest(Guid EnrollmentId, string DisplayName);
+public sealed record UpdateDistanceAttendanceRequest(string Attendance, DateTimeOffset? ConnectedAtUtc, DateTimeOffset? DisconnectedAtUtc, int ConnectedMinutes, int ParticipationPercent, int CompletedActivities, int ActivityCount);
+public sealed record ChangeDistanceSessionStatusRequest(string Status);
+public sealed record AsyncModuleStepDto(Guid Id, string Code, string Label, int SortOrder);
+public sealed record AsyncLearningModuleDto(Guid Id, Guid OrganizationId, Guid SiteId, Guid ProgramId, Guid CohortId, string Title, string? Description, int EstimatedMinutes, DateOnly DueDate, string TrainerDisplayName, string Status, int ProgressPercent, int CompletedStudents, int ExpectedStudents, decimal? AverageScore, IReadOnlyCollection<AsyncModuleStepDto> Steps);
+public sealed record CreateAsyncLearningModuleRequest(Guid SiteId, Guid ProgramId, Guid CohortId, string Title, string? Description, int EstimatedMinutes, DateOnly DueDate, string TrainerDisplayName, int ExpectedStudents, IReadOnlyCollection<CreateAsyncModuleStepRequest>? Steps);
+public sealed record CreateAsyncModuleStepRequest(string Code, string Label, int SortOrder);
+public sealed record UpdateAsyncModuleProgressRequest(int ProgressPercent, int CompletedStudents, decimal? AverageScore);
