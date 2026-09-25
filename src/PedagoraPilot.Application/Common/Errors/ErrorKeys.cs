@@ -114,6 +114,9 @@ public static class ErrorKeys
     public const string DrivingCriterionCodeRequired = "DRIVING_CRITERION_CODE_REQUIRED";
     public const string DrivingCriterionLabelRequired = "DRIVING_CRITERION_LABEL_REQUIRED";
     public const string DrivingSessionCohortMismatch = "DRIVING_SESSION_COHORT_MISMATCH";
+    public const string DrivingSessionInvalid = "DRIVING_SESSION_INVALID";
+    public const string DrivingCriteriaInvalid = "DRIVING_CRITERIA_INVALID";
+    public const string SessionTrainerIdentityInvalid = "SESSION_TRAINER_IDENTITY_INVALID";
     public const string WorkplacePeriodNotFound = "WORKPLACE_PERIOD_NOT_FOUND";
     public const string WorkplaceForbidden = "WORKPLACE_FORBIDDEN";
     public const string WorkplacePeriodOverlap = "WORKPLACE_PERIOD_OVERLAP";
@@ -122,6 +125,8 @@ public static class ErrorKeys
     public const string WorkplaceCohortRequired = "WORKPLACE_COHORT_REQUIRED";
     public const string WorkplaceReferentialRequired = "WORKPLACE_REFERENTIAL_REQUIRED";
     public const string WorkplacePeriodTypeRequired = "WORKPLACE_PERIOD_TYPE_REQUIRED";
+    public const string WorkplacePeriodTypeInvalid = "WORKPLACE_PERIOD_TYPE_INVALID";
+    public const string WorkplaceDocumentRequired = "WORKPLACE_DOCUMENT_REQUIRED";
     public const string WorkplaceCompanyRequired = "WORKPLACE_COMPANY_REQUIRED";
     public const string WorkplaceCityRequired = "WORKPLACE_CITY_REQUIRED";
     public const string WorkplaceTutorRequired = "WORKPLACE_TUTOR_REQUIRED";

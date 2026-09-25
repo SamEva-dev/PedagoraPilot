@@ -69,6 +69,7 @@ try
     app.UseHttpsRedirection();
     app.UseCors("Frontend");
     app.UseAuthentication();
+    app.UseMiddleware<TenantIdentityMiddleware>();
     app.UseAuthorization();
     app.UseMiddleware<IdempotencyMiddleware>();
     app.MapControllers();

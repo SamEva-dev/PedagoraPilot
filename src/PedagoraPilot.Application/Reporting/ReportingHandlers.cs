@@ -10,11 +10,10 @@ internal static class ReportingScope
 {
     public static void EnsureOrganization(ICurrentUser current, Guid requested)
     {
-        if (current.OrganizationId.HasValue && current.OrganizationId.Value != requested)
-            throw new ForbiddenApplicationException(ErrorKeys.ReportingForbidden);
+        TenantScope.Ensure(current, requested);
     }
 
-    public static Guid? Organization(ICurrentUser current) => current.OrganizationId;
+    public static Guid? Organization(ICurrentUser current) => TenantScope.Organization(current);
 }
 
 public sealed class GetOrganizationDashboardHandler(IReportingReadRepository reports, ICurrentUser current) : IRequestHandler<GetOrganizationDashboardQuery, OrganizationDashboardDto>
@@ -50,9 +49,9 @@ public sealed class GetAuditHandler(IReportingReadRepository reports, ICurrentUs
 {
     public Task<PagedAuditDto> Handle(GetAuditQuery q, CancellationToken ct)
     {
-        if (current.OrganizationId.HasValue && q.OrganizationId.HasValue && current.OrganizationId.Value != q.OrganizationId.Value)
-            throw new ForbiddenApplicationException(ErrorKeys.ReportingForbidden);
-        var organizationId = current.OrganizationId ?? q.OrganizationId;
+        if (q.OrganizationId.HasValue)
+            TenantScope.Ensure(current, q.OrganizationId.Value);
+        var organizationId = TenantScope.Organization(current) ?? q.OrganizationId;
         return reports.GetAuditAsync(organizationId, q.Action, q.EntityType, q.UserId, q.From, q.To, Math.Max(1, q.Page), Math.Clamp(q.PageSize, 1, 200), ct);
     }
 }

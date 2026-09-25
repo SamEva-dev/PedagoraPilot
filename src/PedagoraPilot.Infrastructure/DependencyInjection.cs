@@ -25,6 +25,7 @@ using PedagoraPilot.Infrastructure.Persistence.Repositories;
 using PedagoraPilot.Infrastructure.Outbox;
 
 namespace PedagoraPilot.Infrastructure;
+
 public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
@@ -48,6 +49,8 @@ public static class DependencyInjection
             builder.WithTypeRegistry(registry =>
             {
                 registry.Register<OrganizationProvisionedDomainEvent>("pedagora.organization.provisioned.v1");
+                registry.Register<TrainingSiteCreatedDomainEvent>("pedagora.organization.training-site.created.v1");
+                registry.Register<TrainingSiteUpdatedDomainEvent>("pedagora.organization.training-site.updated.v1");
                 registry.Register<TrainingProgramCreatedDomainEvent>("pedagora.catalog.program.created.v1");
                 registry.Register<TrainingProgramUpdatedDomainEvent>("pedagora.catalog.program.updated.v1");
                 registry.Register<ProgramOfferingChangedDomainEvent>("pedagora.catalog.offering.changed.v1");

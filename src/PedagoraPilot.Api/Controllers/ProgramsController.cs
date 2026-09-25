@@ -12,6 +12,7 @@ public sealed class ProgramsController(IMediator mediator) : ControllerBase
 {
     [HttpGet, HasPermission(PedagoraPilotPermissionCodes.Programs.View)]
     public Task<IReadOnlyCollection<TrainingProgramDto>> Get([FromQuery] Guid? organizationId, CancellationToken ct) => mediator.Send(new GetProgramsQuery(organizationId), ct);
+    
     [HttpPost, HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public async Task<ActionResult<TrainingProgramDto>> Create(CreateProgramRequest r, CancellationToken ct)
     {
@@ -21,6 +22,7 @@ public sealed class ProgramsController(IMediator mediator) : ControllerBase
 
     [HttpPut("{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public Task<TrainingProgramDto> Update(Guid id, UpdateProgramRequest r, CancellationToken ct) => mediator.Send(new UpdateProgramCommand(id, r.FamilyCode, r.Name, r.DescriptionKey, r.Icon, r.DurationHours, r.Status, r.EnabledModules), ct);
+    
     [HttpPut("{id:guid}/sites/{siteId:guid}/offering"), HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public Task<ProgramOfferingDto> Offering(Guid id, Guid siteId, SetProgramOfferingRequest r, CancellationToken ct) => mediator.Send(new SetProgramOfferingCommand(id, siteId, r.Active), ct);
 }

@@ -38,20 +38,25 @@ public sealed class GetDistanceLearningSessionsQueryHandler(IDistanceLearningSes
     public async Task<IReadOnlyCollection<DistanceLearningSessionDto>> Handle(GetDistanceLearningSessionsQuery r, CancellationToken ct)
     {
         IQueryable<DistanceLearningSession> q = repo.Query(false).Include(x => x.Participants);
-        if (current.OrganizationId.HasValue)
-            q = q.Where(x => x.OrganizationId == current.OrganizationId.Value);
+        var organizationId = TenantScope.Organization(current);
+        if (organizationId.HasValue)
+            q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
         return (await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct)).Select(x => DlMap.Session(x, mapper)).ToArray();
     }
 }
 
-public sealed class CreateDistanceLearningSessionCommandHandler(IDistanceLearningSessionRepository repo, ICohortRepository cohorts, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<CreateDistanceLearningSessionCommand, DistanceLearningSessionDto>
+public sealed class CreateDistanceLearningSessionCommandHandler(IDistanceLearningSessionRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<CreateDistanceLearningSessionCommand, DistanceLearningSessionDto>
 {
     public async Task<DistanceLearningSessionDto> Handle(CreateDistanceLearningSessionCommand r, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(r.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
-        if (current.OrganizationId.HasValue && cohort.OrganizationId != current.OrganizationId.Value)
+        TenantScope.Ensure(current, cohort.OrganizationId);
+        if (r.SiteId != cohort.SiteId)
+            throw new ForbiddenApplicationException(ErrorKeys.DistanceForbidden);
+        var offering = await offerings.GetByIdAsync(cohort.ProgramOfferingId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
+        if (offering.ProgramId != r.ProgramId)
             throw new ForbiddenApplicationException(ErrorKeys.DistanceForbidden);
         if (!Enum.TryParse<DistancePlatform>(r.Platform, true, out var platform))
             throw new ValidationApplicationException(ErrorKeys.DistancePlatformInvalid);
@@ -61,12 +66,13 @@ public sealed class CreateDistanceLearningSessionCommandHandler(IDistanceLearnin
     }
 }
 
-public sealed class AddDistanceParticipantCommandHandler(IDistanceLearningSessionRepository repo, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<AddDistanceParticipantCommand, DistanceLearningSessionDto>
+public sealed class AddDistanceParticipantCommandHandler(IDistanceLearningSessionRepository repo, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<AddDistanceParticipantCommand, DistanceLearningSessionDto>
 {
     public async Task<DistanceLearningSessionDto> Handle(AddDistanceParticipantCommand r, CancellationToken ct)
     {
         var x = await repo.Query(true).Include(a => a.Participants).SingleOrDefaultAsync(a => a.Id == r.SessionId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceSessionNotFound);
         var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        TenantScope.Ensure(current, x.OrganizationId);
         if (enrollment.CohortId != x.CohortId)
             throw new ConflictApplicationException(ErrorKeys.DistanceParticipantCohortMismatch);
         x.AddParticipant(r.EnrollmentId, r.DisplayName);
@@ -74,11 +80,12 @@ public sealed class AddDistanceParticipantCommandHandler(IDistanceLearningSessio
     }
 }
 
-public sealed class ChangeDistanceSessionStatusCommandHandler(IDistanceLearningSessionRepository repo, IObjectMapper mapper) : IRequestHandler<ChangeDistanceSessionStatusCommand, DistanceLearningSessionDto>
+public sealed class ChangeDistanceSessionStatusCommandHandler(IDistanceLearningSessionRepository repo, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<ChangeDistanceSessionStatusCommand, DistanceLearningSessionDto>
 {
     public async Task<DistanceLearningSessionDto> Handle(ChangeDistanceSessionStatusCommand r, CancellationToken ct)
     {
         var x = await repo.Query(true).Include(a => a.Participants).SingleOrDefaultAsync(a => a.Id == r.SessionId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceSessionNotFound);
+        TenantScope.Ensure(current, x.OrganizationId);
         if (!Enum.TryParse<DistanceLearningSessionStatus>(r.Status, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.DistanceSessionStatusInvalid);
         x.ChangeStatus(status);
@@ -86,11 +93,12 @@ public sealed class ChangeDistanceSessionStatusCommandHandler(IDistanceLearningS
     }
 }
 
-public sealed class UpdateDistanceAttendanceCommandHandler(IDistanceLearningSessionRepository repo, IObjectMapper mapper) : IRequestHandler<UpdateDistanceAttendanceCommand, DistanceLearningSessionDto>
+public sealed class UpdateDistanceAttendanceCommandHandler(IDistanceLearningSessionRepository repo, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateDistanceAttendanceCommand, DistanceLearningSessionDto>
 {
     public async Task<DistanceLearningSessionDto> Handle(UpdateDistanceAttendanceCommand r, CancellationToken ct)
     {
         var x = await repo.Query(true).Include(a => a.Participants).SingleOrDefaultAsync(a => a.Id == r.SessionId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceSessionNotFound);
+        TenantScope.Ensure(current, x.OrganizationId);
         if (!Enum.TryParse<DistanceAttendanceStatus>(r.Attendance, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.DistanceAttendanceInvalid);
         x.RecordParticipantAttendance(r.ParticipantId, status, r.ConnectedAtUtc, r.DisconnectedAtUtc, r.ConnectedMinutes, r.ParticipationPercent, r.CompletedActivities, r.ActivityCount);
@@ -103,20 +111,25 @@ public sealed class GetAsyncLearningModulesQueryHandler(IAsyncLearningModuleRepo
     public async Task<IReadOnlyCollection<AsyncLearningModuleDto>> Handle(GetAsyncLearningModulesQuery r, CancellationToken ct)
     {
         IQueryable<AsyncLearningModule> q = repo.Query(false).Include(x => x.Steps);
-        if (current.OrganizationId.HasValue)
-            q = q.Where(x => x.OrganizationId == current.OrganizationId.Value);
+        var organizationId = TenantScope.Organization(current);
+        if (organizationId.HasValue)
+            q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
         return (await q.OrderBy(x => x.DueDate).ToListAsync(ct)).Select(x => DlMap.Module(x, mapper)).ToArray();
     }
 }
 
-public sealed class CreateAsyncLearningModuleCommandHandler(IAsyncLearningModuleRepository repo, ICohortRepository cohorts, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<CreateAsyncLearningModuleCommand, AsyncLearningModuleDto>
+public sealed class CreateAsyncLearningModuleCommandHandler(IAsyncLearningModuleRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<CreateAsyncLearningModuleCommand, AsyncLearningModuleDto>
 {
     public async Task<AsyncLearningModuleDto> Handle(CreateAsyncLearningModuleCommand r, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(r.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
-        if (current.OrganizationId.HasValue && cohort.OrganizationId != current.OrganizationId.Value)
+        TenantScope.Ensure(current, cohort.OrganizationId);
+        if (r.SiteId != cohort.SiteId)
+            throw new ForbiddenApplicationException(ErrorKeys.DistanceForbidden);
+        var offering = await offerings.GetByIdAsync(cohort.ProgramOfferingId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
+        if (offering.ProgramId != r.ProgramId)
             throw new ForbiddenApplicationException(ErrorKeys.DistanceForbidden);
         var x = AsyncLearningModule.Create(cohort.OrganizationId, r.SiteId, r.ProgramId, cohort.Id, r.Title, r.Description, r.EstimatedMinutes, r.DueDate, r.TrainerDisplayName, r.ExpectedStudents);
         foreach (var step in r.Steps ?? [])
@@ -126,11 +139,12 @@ public sealed class CreateAsyncLearningModuleCommandHandler(IAsyncLearningModule
     }
 }
 
-public sealed class UpdateAsyncModuleProgressCommandHandler(IAsyncLearningModuleRepository repo, IObjectMapper mapper) : IRequestHandler<UpdateAsyncModuleProgressCommand, AsyncLearningModuleDto>
+public sealed class UpdateAsyncModuleProgressCommandHandler(IAsyncLearningModuleRepository repo, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateAsyncModuleProgressCommand, AsyncLearningModuleDto>
 {
     public async Task<AsyncLearningModuleDto> Handle(UpdateAsyncModuleProgressCommand r, CancellationToken ct)
     {
         var x = await repo.Query(true).Include(a => a.Steps).SingleOrDefaultAsync(a => a.Id == r.ModuleId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceModuleNotFound);
+        TenantScope.Ensure(current, x.OrganizationId);
         x.UpdateProgress(r.ProgressPercent, r.CompletedStudents, r.AverageScore);
         return DlMap.Module(x, mapper);
     }

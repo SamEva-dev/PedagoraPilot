@@ -127,7 +127,7 @@ public sealed class WorkplacePeriod : AggregateRoot<WorkplacePeriodId>
 
     public void SetActivity(WorkplaceActivityId activityId, WorkplaceActivityStatus status, string? comment)
     {
-        EnsureMutable();
+        EnsureFollowupMutable();
         var a = _activities.SingleOrDefault(x => x.Id == activityId) ?? throw new DomainException("WORKPLACE_ACTIVITY_NOT_FOUND");
         a.SetStatus(status, comment);
         UpdatedAtUtc = DateTime.UtcNow;
@@ -136,7 +136,7 @@ public sealed class WorkplacePeriod : AggregateRoot<WorkplacePeriodId>
 
     public void SetDocument(WorkplaceDocumentChecklistItemId itemId, WorkplaceDocumentStatus status, Guid? documentId)
     {
-        EnsureMutable();
+        EnsureFollowupMutable();
         var d = _documents.SingleOrDefault(x => x.Id == itemId) ?? throw new DomainException("WORKPLACE_DOCUMENT_ITEM_NOT_FOUND");
         d.SetStatus(status, documentId);
         if (d.Code == "AGREEMENT")
@@ -147,7 +147,7 @@ public sealed class WorkplacePeriod : AggregateRoot<WorkplacePeriodId>
 
     public WorkplaceEvaluation AddEvaluation(WorkplaceEvaluationKind kind, string evaluatorDisplayName, DateTimeOffset evaluatedAtUtc, string summary, string? strengths, string? improvementAreas, bool? validated)
     {
-        EnsureMutable();
+        EnsureFollowupMutable();
         var e = new WorkplaceEvaluation(WorkplaceEvaluationId.New(), Id, kind, evaluatorDisplayName, evaluatedAtUtc, summary, strengths, improvementAreas, validated);
         _evaluations.Add(e);
         UpdatedAtUtc = DateTime.UtcNow;
@@ -176,6 +176,11 @@ public sealed class WorkplacePeriod : AggregateRoot<WorkplacePeriodId>
     private void EnsureMutable()
     {
         if (Status is WorkplacePeriodStatus.Completed or WorkplacePeriodStatus.Cancelled)
+            throw new DomainException("WORKPLACE_PERIOD_LOCKED");
+    }
+    private void EnsureFollowupMutable()
+    {
+        if (Status == WorkplacePeriodStatus.Cancelled)
             throw new DomainException("WORKPLACE_PERIOD_LOCKED");
     }
 

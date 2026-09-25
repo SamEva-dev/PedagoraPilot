@@ -1,3 +1,4 @@
+using PedagoraPilot.Application.Abstractions.Security;
 using DomainRelay.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Abstractions.Persistence;
@@ -7,11 +8,20 @@ using PedagoraPilot.Domain.Catalog;
 
 namespace PedagoraPilot.Application.Catalog.Referentials;
 public sealed record GetReferentialsQuery(Guid? ProgramId = null) : IRequest<IReadOnlyCollection<ReferentialVersionDto>>;
-public sealed class GetReferentialsQueryHandler(IReferentialRepository referentials, IReferentialVersionRepository versions, ITrainingProgramRepository programs) : IRequestHandler<GetReferentialsQuery, IReadOnlyCollection<ReferentialVersionDto>>
+public sealed class GetReferentialsQueryHandler(IReferentialRepository referentials, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ICurrentUser current) : IRequestHandler<GetReferentialsQuery, IReadOnlyCollection<ReferentialVersionDto>>
 {
     public async Task<IReadOnlyCollection<ReferentialVersionDto>> Handle(GetReferentialsQuery q, CancellationToken ct)
     {
-        var rs = await referentials.Query(false).Where(x => !q.ProgramId.HasValue || x.ProgramId == q.ProgramId).ToListAsync(ct);
+        var organizationId = TenantScope.Organization(current);
+        var permittedProgramIds = organizationId.HasValue
+            ? await (from offering in offerings.Query(false)
+                     join site in sites.Query(false) on offering.SiteId equals site.Id
+                     where offering.IsActive && site.OrganizationId == organizationId.Value
+                     select offering.ProgramId).Distinct().ToArrayAsync(ct)
+            : null;
+        var rs = await referentials.Query(false)
+            .Where(x => (!q.ProgramId.HasValue || x.ProgramId == q.ProgramId)
+                && (permittedProgramIds == null || permittedProgramIds.Contains(x.ProgramId))).ToListAsync(ct);
         var ids = rs.Select(x => x.Id).ToArray();
         var vs = await versions.Query(false).Where(x => ids.Contains(x.ReferentialId)).OrderByDescending(x => x.EffectiveFrom).ToListAsync(ct);
         var caps = await versions.GetCapabilitiesAsync(vs.Select(x => x.Id), ct);
@@ -22,10 +32,11 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
     internal static ReferentialVersionDto ToDto(ReferentialVersion v, Referential r, TrainingProgram p, IReadOnlyCollection<string>? capabilities = null) => new(v.Id, v.ExternalKey ?? v.Id.ToString(), r.Id, r.ProgramId, p.ExternalKey ?? p.Id.ToString(), r.Code, r.Name, v.VersionLabel, v.CertificationCode, v.Status.ToString().ToLowerInvariant(), v.EffectiveFrom, v.EffectiveTo, v.TotalHours, v.SheetCount, v.RequiredDocumentCount, capabilities ?? v.Capabilities, v.NotesKey);
 }
 
-public sealed class CreateReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs) : IRequestHandler<CreateReferentialVersionCommand, ReferentialVersionDto>
+public sealed class CreateReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<CreateReferentialVersionCommand, ReferentialVersionDto>
 {
     public async Task<ReferentialVersionDto> Handle(CreateReferentialVersionCommand r, CancellationToken ct)
     {
+        TenantScope.RequirePlatform(current);
         var rf = await refs.GetByIdAsync(r.ReferentialId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialNotFound);
         if (await versions.VersionExistsAsync(r.ReferentialId, r.Version, ct))
             throw new ConflictApplicationException(ErrorKeys.ReferentialVersionAlreadyExists);
@@ -36,10 +47,11 @@ public sealed class CreateReferentialVersionCommandHandler(IReferentialRepositor
     }
 }
 
-public sealed class PublishReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs) : IRequestHandler<PublishReferentialVersionCommand, ReferentialVersionDto>
+public sealed class PublishReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<PublishReferentialVersionCommand, ReferentialVersionDto>
 {
     public async Task<ReferentialVersionDto> Handle(PublishReferentialVersionCommand r, CancellationToken ct)
     {
+        TenantScope.RequirePlatform(current);
         var v = await versions.GetByIdAsync(r.VersionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialVersionNotFound);
         var rf = await refs.GetByIdAsync(v.ReferentialId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialNotFound);
         var p = await programs.GetByIdAsync(rf.ProgramId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramNotFound);

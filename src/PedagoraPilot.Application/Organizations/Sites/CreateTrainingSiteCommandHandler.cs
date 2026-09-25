@@ -1,3 +1,4 @@
+using PedagoraPilot.Application.Abstractions.Security;
 using DomainRelay.Abstractions;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Common.Errors;
@@ -9,14 +10,17 @@ public sealed class CreateTrainingSiteCommandHandler : IRequestHandler<CreateTra
 {
     private readonly IOrganizationRepository _orgs;
     private readonly ITrainingSiteRepository _sites;
-    public CreateTrainingSiteCommandHandler(IOrganizationRepository orgs, ITrainingSiteRepository sites)
+    private readonly ICurrentUser _current;
+    public CreateTrainingSiteCommandHandler(IOrganizationRepository orgs, ITrainingSiteRepository sites, ICurrentUser current)
     {
         _orgs = orgs;
         _sites = sites;
+        _current = current;
     }
 
     public async Task<WorkspaceSiteDto> Handle(CreateTrainingSiteCommand r, CancellationToken ct)
     {
+        TenantScope.Ensure(_current, r.OrganizationId);
         var org = await _orgs.GetByIdAsync(r.OrganizationId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
         if (await _sites.CodeExistsAsync(r.OrganizationId, r.Code, ct))
             throw new ConflictApplicationException(ErrorKeys.SiteCodeAlreadyExists);

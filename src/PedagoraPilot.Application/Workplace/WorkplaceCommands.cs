@@ -44,7 +44,6 @@ public sealed class RecordWorkplaceEvaluationCommandValidator : AbstractValidato
 {
     public RecordWorkplaceEvaluationCommandValidator()
     {
-        RuleFor(x => x.EvaluatorDisplayName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Summary).NotEmpty().MaximumLength(4000);
     }
 }

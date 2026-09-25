@@ -45,7 +45,9 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
         var ss = organizationIds.Length == 0
             ? []
             : await sites.Query(false)
-                .Where(x => x.IsActive && organizationIds.Contains(x.OrganizationId))
+                .Where(x =>
+                    x.Status == PedagoraPilot.Domain.Organizations.TrainingSiteStatus.Active &&
+                    organizationIds.Contains(x.OrganizationId))
                 .OrderBy(x => x.Name)
                 .ToListAsync(ct);
 

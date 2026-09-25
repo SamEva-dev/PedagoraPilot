@@ -34,13 +34,11 @@ public sealed class RecordDrivingEvaluationCommandValidator : AbstractValidator<
     {
         RuleFor(x => x.EnrollmentId).Must(x => !x.IsEmpty);
         RuleFor(x => x.CompetencyDefinitionId).Must(x => !x.IsEmpty);
-        RuleFor(x => x.TrainerDisplayName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Subject).NotEmpty().MaximumLength(500);
         RuleFor(x => x.Criteria).NotEmpty();
         RuleForEach(x => x.Criteria).ChildRules(c =>
         {
             c.RuleFor(x => x.Code).NotEmpty().MaximumLength(80);
-            c.RuleFor(x => x.Label).NotEmpty().MaximumLength(300);
             c.RuleFor(x => x.Level).NotEmpty();
         });
     }

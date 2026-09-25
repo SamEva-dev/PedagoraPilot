@@ -28,8 +28,9 @@ public sealed class GetRemoteWorkRequestsQueryHandler(IRemoteWorkRequestReposito
     public async Task<IReadOnlyCollection<RemoteWorkRequestDto>> Handle(GetRemoteWorkRequestsQuery r, CancellationToken ct)
     {
         var q = repo.Query(false).Include(x => x.Activities).AsQueryable();
-        if (current.OrganizationId.HasValue)
-            q = q.Where(x => x.OrganizationId == current.OrganizationId.Value);
+        var organizationId = TenantScope.Organization(current);
+        if (organizationId.HasValue)
+            q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.SiteId.HasValue)
             q = q.Where(x => x.SiteId == r.SiteId.Value);
         if (r.MineOnly && current.UserId.HasValue)
@@ -38,11 +39,13 @@ public sealed class GetRemoteWorkRequestsQueryHandler(IRemoteWorkRequestReposito
     }
 }
 
-public sealed class CreateRemoteWorkCommandHandler(IRemoteWorkRequestRepository repo, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<CreateRemoteWorkCommand, RemoteWorkRequestDto>
+public sealed class CreateRemoteWorkCommandHandler(IRemoteWorkRequestRepository repo, ITrainingSiteRepository sites, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<CreateRemoteWorkCommand, RemoteWorkRequestDto>
 {
     public async Task<RemoteWorkRequestDto> Handle(CreateRemoteWorkCommand r, CancellationToken ct)
     {
         if (!current.OrganizationId.HasValue || !current.UserId.HasValue)
+            throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
+        if (!await sites.Query(false).AnyAsync(x => x.Id == r.SiteId && x.OrganizationId == current.OrganizationId.Value, ct))
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         if (!Enum.TryParse<RemoteWorkPeriod>(Normalize(r.Period), true, out var period))
             throw new ValidationApplicationException(ErrorKeys.RemoteWorkPeriodInvalid);
@@ -62,6 +65,7 @@ public sealed class DecideRemoteWorkCommandHandler(IRemoteWorkRequestRepository 
     public async Task<RemoteWorkRequestDto> Handle(DecideRemoteWorkCommand r, CancellationToken ct)
     {
         var x = await repo.Query(true).Include(a => a.Activities).SingleOrDefaultAsync(a => a.Id == r.RequestId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.RemoteWorkNotFound);
+        TenantScope.Ensure(current, x.OrganizationId);
         if (!current.UserId.HasValue)
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         var name = current.DisplayName ?? current.Email ?? "Pedagora Pilot";
@@ -78,6 +82,7 @@ public sealed class UpdateRemoteWorkActivityCommandHandler(IRemoteWorkRequestRep
     public async Task<RemoteWorkRequestDto> Handle(UpdateRemoteWorkActivityCommand r, CancellationToken ct)
     {
         var x = await repo.Query(true).Include(a => a.Activities).SingleOrDefaultAsync(a => a.Id == r.RequestId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.RemoteWorkNotFound);
+        TenantScope.Ensure(current, x.OrganizationId);
         if (!current.UserId.HasValue || x.AuthGateUserId != current.UserId.Value)
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         if (!Enum.TryParse<RemoteWorkActivityStatus>(r.Status, true, out var status))

@@ -17,6 +17,8 @@ public sealed class WorkplaceController(IMediator mediator) : ControllerBase
     public Task<WorkplacePeriodDto> GetOne(Guid id, CancellationToken ct) => mediator.Send(new GetWorkplacePeriodQuery(new WorkplacePeriodId(id)), ct);
     [HttpGet("referentials/{referentialVersionId:guid}/requirements"), HasPermission(PedagoraPilotPermissionCodes.Internships.View)]
     public Task<IReadOnlyCollection<WorkplaceRequirementDto>> Requirements(Guid referentialVersionId, [FromQuery] string periodTypeCode, CancellationToken ct) => mediator.Send(new GetWorkplaceRequirementsQuery(referentialVersionId, periodTypeCode), ct);
+    [HttpGet("referentials/{referentialVersionId:guid}/period-types"), HasPermission(PedagoraPilotPermissionCodes.Internships.View)]
+    public Task<IReadOnlyCollection<string>> PeriodTypes(Guid referentialVersionId, CancellationToken ct) => mediator.Send(new GetWorkplacePeriodTypesQuery(referentialVersionId), ct);
     [HttpPost("periods"), HasPermission(PedagoraPilotPermissionCodes.Internships.Manage)]
     public async Task<ActionResult<WorkplacePeriodDto>> Create(CreateWorkplacePeriodRequest r, CancellationToken ct)
     {

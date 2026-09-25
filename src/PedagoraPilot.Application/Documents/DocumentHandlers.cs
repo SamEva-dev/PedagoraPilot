@@ -75,11 +75,12 @@ internal static class DocumentApplication
         return $"{organizationId:N}/{documentId.Value:N}/v{version:D4}{extension}";
     }
 
-    public static bool IsStudent(ICurrentUser current) => current.Roles.Any(x => x.Equals("student", StringComparison.OrdinalIgnoreCase) || x.Equals("stagiaire", StringComparison.OrdinalIgnoreCase));
+    public static bool IsStudent(ICurrentUser current) =>
+        PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(current)
+        || current.Roles.Any(x => x.Equals("student", StringComparison.OrdinalIgnoreCase) || x.Equals("stagiaire", StringComparison.OrdinalIgnoreCase));
     public static async Task EnsureCanReadAsync(ManagedDocument document, ICurrentUser current, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, CancellationToken ct)
     {
-        if (current.OrganizationId.HasValue && document.OrganizationId != current.OrganizationId.Value)
-            throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
+        TenantScope.Ensure(current, document.OrganizationId);
         if (!IsStudent(current))
             return;
         if (document.Visibility == DocumentVisibility.All)
@@ -100,8 +101,9 @@ public sealed class GetDocumentsQueryHandler(IDocumentRepository documents, ILea
     public async Task<IReadOnlyCollection<DocumentDto>> Handle(GetDocumentsQuery request, CancellationToken ct)
     {
         var query = documents.Query(false).Include(x => x.Versions).Where(x => x.Status == DocumentStatus.Active);
-        if (current.OrganizationId.HasValue)
-            query = query.Where(x => x.OrganizationId == current.OrganizationId.Value);
+        var organizationId = TenantScope.Organization(current);
+        if (organizationId.HasValue)
+            query = query.Where(x => x.OrganizationId == organizationId.Value);
         if (request.CohortId.HasValue)
             query = query.Where(x => x.CohortId == request.CohortId.Value);
         if (!string.IsNullOrWhiteSpace(request.Category) && DocumentApplication.TryCategory(request.Category, out var category))
@@ -135,12 +137,14 @@ public sealed class GetDocumentQueryHandler(IDocumentRepository documents, ILear
 
     internal static void EnsureOrganization(ManagedDocument document, ICurrentUser current)
     {
-        if (current.OrganizationId.HasValue && document.OrganizationId != current.OrganizationId.Value)
-            throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
+        TenantScope.Ensure(current, document.OrganizationId);
     }
 }
 
-public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UploadDocumentCommand, DocumentDto>
+public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current,
+    ITrainingSiteRepository sites, ICohortRepository cohorts, IEnrollmentRepository enrollments,
+    IWorkplacePeriodRepository periods, ICertificationCandidateRepository candidates,
+    IProgramOfferingRepository offerings) : IRequestHandler<UploadDocumentCommand, DocumentDto>
 {
     public async Task<DocumentDto> Handle(UploadDocumentCommand request, CancellationToken ct)
     {
@@ -154,6 +158,19 @@ public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, 
             throw new ValidationApplicationException(ErrorKeys.DocumentOwnerTypeInvalid);
         if (ownerType != DocumentOwnerType.None && !request.OwnerId.HasValue)
             throw new ValidationApplicationException(ErrorKeys.DocumentOwnerRequired);
+        var organizationId = current.OrganizationId.Value;
+        if (request.SiteId.HasValue && !await sites.Query(false).AnyAsync(x => x.Id == request.SiteId.Value && x.OrganizationId == organizationId, ct))
+            throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
+        if (request.CohortId.HasValue && !await cohorts.Query(false).AnyAsync(x => x.Id.Value == request.CohortId.Value && x.OrganizationId == organizationId && (!request.SiteId.HasValue || x.SiteId == request.SiteId.Value), ct))
+            throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
+        if (request.ProgramId.HasValue && !await (from offering in offerings.Query(false)
+            join site in sites.Query(false) on offering.SiteId equals site.Id
+            where offering.ProgramId == request.ProgramId.Value && site.OrganizationId == organizationId
+                && (!request.SiteId.HasValue || site.Id == request.SiteId.Value)
+            select offering.Id).AnyAsync(ct))
+            throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
+        if (ownerType != DocumentOwnerType.None && !await OwnerBelongsToOrganizationAsync(ownerType, request.OwnerId!.Value, organizationId, ct))
+            throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
         if (!policy.IsAllowed(request.FileName, request.ContentType))
             throw new ValidationApplicationException(ErrorKeys.DocumentFileTypeNotAllowed);
         var document = ManagedDocument.Create(current.OrganizationId.Value, request.SiteId, request.ProgramId, request.CohortId, ownerType, request.OwnerId, request.Title, request.Description, category, visibility, current.UserId?.ToString() ?? "authgate", request.AuthorDisplayName);
@@ -177,6 +194,21 @@ public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, 
                 File.Delete(buffered.TempPath);
         }
     }
+
+    private async Task<bool> OwnerBelongsToOrganizationAsync(DocumentOwnerType type, Guid ownerId, Guid organizationId, CancellationToken ct) => type switch
+    {
+        DocumentOwnerType.Organization => ownerId == organizationId,
+        DocumentOwnerType.Site => await sites.Query(false).AnyAsync(x => x.Id == ownerId && x.OrganizationId == organizationId, ct),
+        DocumentOwnerType.Program => await (from offering in offerings.Query(false)
+            join site in sites.Query(false) on offering.SiteId equals site.Id
+            where offering.ProgramId == ownerId && site.OrganizationId == organizationId
+            select offering.Id).AnyAsync(ct),
+        DocumentOwnerType.Cohort => await cohorts.Query(false).AnyAsync(x => x.Id.Value == ownerId && x.OrganizationId == organizationId, ct),
+        DocumentOwnerType.Enrollment => await enrollments.Query(false).AnyAsync(x => x.Id.Value == ownerId && x.OrganizationId == organizationId, ct),
+        DocumentOwnerType.WorkplacePeriod => await periods.Query(false).AnyAsync(x => x.Id.Value == ownerId && x.OrganizationId == organizationId, ct),
+        DocumentOwnerType.CertificationCandidate => await candidates.Query(false).AnyAsync(x => x.Id.Value == ownerId && x.OrganizationId == organizationId, ct),
+        _ => false
+    };
 }
 
 public sealed class ReplaceDocumentVersionCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<ReplaceDocumentVersionCommand, DocumentDto>

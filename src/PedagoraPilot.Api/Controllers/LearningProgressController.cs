@@ -17,6 +17,9 @@ public sealed class LearningProgressController(IMediator mediator) : ControllerB
     [HttpGet("enrollments/{enrollmentId:guid}/competencies")]
     [HasPermission(PedagoraPilotPermissionCodes.Skills.View)]
     public Task<IReadOnlyCollection<LearnerCompetencyDto>> GetLearnerCompetencies(Guid enrollmentId, CancellationToken ct) => mediator.Send(new GetLearnerCompetenciesQuery(new EnrollmentId(enrollmentId)), ct);
+    [HttpGet("cohorts/{cohortId:guid}/competencies")]
+    [HasPermission(PedagoraPilotPermissionCodes.Skills.View)]
+    public Task<IReadOnlyCollection<CohortCompetencyRowDto>> GetCohortCompetencies(Guid cohortId, CancellationToken ct) => mediator.Send(new GetCohortCompetenciesQuery(new CohortId(cohortId)), ct);
     [HttpPut("enrollments/{enrollmentId:guid}/competencies/{competencyDefinitionId:guid}")]
     [HasPermission(PedagoraPilotPermissionCodes.Skills.Evaluate)]
     public Task<LearnerCompetencyDto> Evaluate(Guid enrollmentId, Guid competencyDefinitionId, [FromBody] EvaluateCompetencyRequest request, CancellationToken ct) => mediator.Send(new EvaluateCompetencyCommand(new EnrollmentId(enrollmentId), new CompetencyDefinitionId(competencyDefinitionId), request.Level, request.Score, request.Comment, request.EvaluatorAuthGateUserId, request.EvaluatorDisplayName, request.EvaluatedAtUtc), ct);

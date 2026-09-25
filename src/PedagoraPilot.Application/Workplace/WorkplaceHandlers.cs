@@ -14,6 +14,13 @@ using PedagoraPilot.Domain.Workplace;
 namespace PedagoraPilot.Application.Workplace;
 internal static class WorkplaceDtoFactory
 {
+    public static bool IsTrainer(ICurrentUser current) =>
+        current.Roles.Contains("PedagoraPilot.Trainer") || current.Roles.Contains("PedagoraPilot.PedagogicalManager");
+    public static void EnsureTrainerVisibility(WorkplacePeriod period, ICurrentUser current)
+    {
+        if (IsTrainer(current) && !period.TrainerVisible)
+            throw new ForbiddenApplicationException(ErrorKeys.WorkplaceForbidden);
+    }
     public static async Task<WorkplacePeriodDto> Period(WorkplacePeriod x, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, CancellationToken ct)
     {
         var enrollment = await enrollments.GetByIdAsync(x.EnrollmentId, false, ct);
@@ -26,8 +33,12 @@ internal static class WorkplaceDtoFactory
                 person = await people.GetByIdAsync(profile.PersonId, false, ct);
         }
 
+        return Period(x, person?.DisplayName ?? "", enrollment?.ExternalKey, mapper);
+    }
+    public static WorkplacePeriodDto Period(WorkplacePeriod x, string learnerDisplayName, string? learnerExternalKey, IObjectMapper mapper)
+    {
         var m = mapper.Map<WorkplacePeriod, WorkplacePeriodReadModel>(x);
-        return new(m.Id.Value, m.EnrollmentId.Value, m.CohortId.Value, m.ReferentialVersionId, m.PeriodTypeCode, person?.DisplayName ?? "", enrollment?.ExternalKey, m.Company, m.City, m.TutorName, m.TutorEmail, m.TutorPhone, m.StartDate, m.EndDate, Hours(m.PlannedMinutes), Hours(m.CompletedMinutes), Status(m.Status), m.AgreementReceived, m.TrainerVisible, m.Notes, m.TutorObservation, x.Activities.Select(a =>
+        return new(m.Id.Value, m.EnrollmentId.Value, m.CohortId.Value, m.ReferentialVersionId, m.PeriodTypeCode, learnerDisplayName, learnerExternalKey, m.Company, m.City, m.TutorName, m.TutorEmail, m.TutorPhone, m.StartDate, m.EndDate, Hours(m.PlannedMinutes), Hours(m.CompletedMinutes), Status(m.Status), m.AgreementReceived, m.TrainerVisible, m.Notes, m.TutorObservation, x.Activities.Select(a =>
         {
             var q = mapper.Map<WorkplaceActivity, WorkplaceActivityReadModel>(a);
             return new WorkplaceActivityDto(q.Id.Value, q.DefinitionId.Value, q.Code, q.Title, q.LabelKey, q.Mandatory, ActivityStatus(q.Status), q.Comment);
@@ -63,17 +74,40 @@ public sealed class GetWorkplacePeriodsQueryHandler(IWorkplacePeriodRepository p
 {
     public async Task<IReadOnlyCollection<WorkplacePeriodDto>> Handle(GetWorkplacePeriodsQuery r, CancellationToken ct)
     {
-        IQueryable<WorkplacePeriod> q = periods.Query(false).Include(x => x.Activities).Include(x => x.Documents).Include(x => x.Evaluations);
-        if (current.OrganizationId.HasValue)
-            q = q.Where(x => x.OrganizationId == current.OrganizationId.Value);
+        if (PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(current))
+        {
+            if (!r.EnrollmentId.HasValue) throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+            var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId.Value, false, ct)
+                ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+            TenantScope.Ensure(current, enrollment.OrganizationId);
+            await PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
+        }
+        IQueryable<WorkplacePeriod> q = periods.Query(false).Include(x => x.Activities).Include(x => x.Documents).Include(x => x.Evaluations).AsSplitQuery();
+        var organizationId = TenantScope.Organization(current);
+        if (organizationId.HasValue)
+            q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
         if (r.EnrollmentId.HasValue)
             q = q.Where(x => x.EnrollmentId == r.EnrollmentId.Value);
+        if (WorkplaceDtoFactory.IsTrainer(current))
+            q = q.Where(x => x.TrainerVisible);
         var rows = await q.OrderByDescending(x => x.StartDate).ToListAsync(ct);
+        if (rows.Count == 0) return [];
+        var enrollmentIds = rows.Select(x => x.EnrollmentId).Distinct().ToArray();
+        var enrollmentsById = (await enrollments.Query(false).Where(x => enrollmentIds.Contains(x.Id)).ToListAsync(ct)).ToDictionary(x => x.Id);
+        var profileIds = enrollmentsById.Values.Select(x => x.LearnerProfileId).Distinct().ToArray();
+        var profilesById = (await profiles.Query(false).Where(x => profileIds.Contains(x.Id)).ToListAsync(ct)).ToDictionary(x => x.Id);
+        var personIds = profilesById.Values.Select(x => x.PersonId).Distinct().ToArray();
+        var peopleById = (await people.Query(false).Where(x => personIds.Contains(x.Id)).ToListAsync(ct)).ToDictionary(x => x.Id);
         var result = new List<WorkplacePeriodDto>();
         foreach (var x in rows)
-            result.Add(await WorkplaceDtoFactory.Period(x, people, profiles, enrollments, mapper, ct));
+        {
+            enrollmentsById.TryGetValue(x.EnrollmentId, out var enrollment);
+            var profile = enrollment is not null && profilesById.TryGetValue(enrollment.LearnerProfileId, out var foundProfile) ? foundProfile : null;
+            var person = profile is not null && peopleById.TryGetValue(profile.PersonId, out var foundPerson) ? foundPerson : null;
+            result.Add(WorkplaceDtoFactory.Period(x, person?.DisplayName ?? "", enrollment?.ExternalKey, mapper));
+        }
         return result;
     }
 }
@@ -83,17 +117,33 @@ public sealed class GetWorkplacePeriodQueryHandler(IWorkplacePeriodRepository pe
     public async Task<WorkplacePeriodDto> Handle(GetWorkplacePeriodQuery r, CancellationToken ct)
     {
         var x = await periods.Query(false).Include(a => a.Activities).Include(a => a.Documents).Include(a => a.Evaluations).SingleOrDefaultAsync(a => a.Id == r.Id, ct) ?? throw new NotFoundApplicationException(ErrorKeys.WorkplacePeriodNotFound);
-        if (current.OrganizationId.HasValue && x.OrganizationId != current.OrganizationId)
+        if (TenantScope.Organization(current) is Guid scopeId && x.OrganizationId != scopeId)
             throw new ForbiddenApplicationException(ErrorKeys.WorkplaceForbidden);
+        WorkplaceDtoFactory.EnsureTrainerVisibility(x, current);
+        var enrollment = await enrollments.GetByIdAsync(x.EnrollmentId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        await PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
         return await WorkplaceDtoFactory.Period(x, people, profiles, enrollments, mapper, ct);
     }
 }
 
-public sealed class GetWorkplaceRequirementsQueryHandler(IWorkplaceActivityDefinitionRepository a, IWorkplaceDocumentRequirementRepository d) : IRequestHandler<GetWorkplaceRequirementsQuery, IReadOnlyCollection<WorkplaceRequirementDto>>
+public sealed class GetWorkplacePeriodTypesQueryHandler(IWorkplaceActivityDefinitionRepository activities, IWorkplaceDocumentRequirementRepository documents, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetWorkplacePeriodTypesQuery, IReadOnlyCollection<string>>
+{
+    public async Task<IReadOnlyCollection<string>> Handle(GetWorkplacePeriodTypesQuery r, CancellationToken ct)
+    {
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        var fromActivities = await activities.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).Select(x => x.PeriodTypeCode).Distinct().ToListAsync(ct);
+        var fromDocuments = await documents.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).Select(x => x.PeriodTypeCode).Distinct().ToListAsync(ct);
+        return fromActivities.Concat(fromDocuments).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray();
+    }
+}
+
+public sealed class GetWorkplaceRequirementsQueryHandler(IWorkplaceActivityDefinitionRepository a, IWorkplaceDocumentRequirementRepository d, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetWorkplaceRequirementsQuery, IReadOnlyCollection<WorkplaceRequirementDto>>
 {
     public async Task<IReadOnlyCollection<WorkplaceRequirementDto>> Handle(GetWorkplaceRequirementsQuery r, CancellationToken ct)
     {
         var p = r.PeriodTypeCode.Trim().ToUpperInvariant();
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
         var activities = await a.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.PeriodTypeCode == p && x.Active).OrderBy(x => x.SortOrder).Select(x => new WorkplaceRequirementDto(x.Id.Value, x.Code, x.Title, x.LabelKey, x.Mandatory, x.SortOrder, "activity")).ToListAsync(ct);
         var docs = await d.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.PeriodTypeCode == p && x.Active).OrderBy(x => x.SortOrder).Select(x => new WorkplaceRequirementDto(x.Id.Value, x.Code, x.Title, x.LabelKey, x.Mandatory, x.SortOrder, "document")).ToListAsync(ct);
         return activities.Concat(docs).ToArray();
@@ -106,12 +156,15 @@ public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository en
     {
         var e = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         var c = await cohorts.GetByIdAsync(e.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
-        if (current.OrganizationId.HasValue && e.OrganizationId != current.OrganizationId)
+        if (TenantScope.Organization(current) is Guid scopeId && e.OrganizationId != scopeId)
             throw new ForbiddenApplicationException(ErrorKeys.WorkplaceForbidden);
+        var code = r.PeriodTypeCode.Trim().ToUpperInvariant();
+        if (!await activities.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active, ct)
+            && !await documents.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active, ct))
+            throw new ValidationApplicationException(ErrorKeys.WorkplacePeriodTypeInvalid);
         if (await periods.OverlapsAsync(e.Id, r.StartDate, r.EndDate, null, ct))
             throw new ConflictApplicationException(ErrorKeys.WorkplacePeriodOverlap);
         var p = WorkplacePeriod.Create(e.OrganizationId, e.Id, c.Id, c.ReferentialVersionId, r.PeriodTypeCode, r.Company, r.City, r.TutorName, r.TutorEmail, r.TutorPhone, r.StartDate, r.EndDate, WorkplaceDtoFactory.Minutes(r.PlannedHours), r.AgreementReceived, r.Notes);
-        var code = r.PeriodTypeCode.Trim().ToUpperInvariant();
         var defs = await activities.Query(false).Where(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active).ToListAsync(ct);
         var docs = await documents.Query(false).Where(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active).ToListAsync(ct);
         p.InitializeChecklist(defs, docs);
@@ -120,11 +173,13 @@ public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository en
     }
 }
 
-public sealed class UpdateWorkplacePeriodCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<UpdateWorkplacePeriodCommand, WorkplacePeriodDto>
+public sealed class UpdateWorkplacePeriodCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateWorkplacePeriodCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(UpdateWorkplacePeriodCommand r, CancellationToken ct)
     {
         var p = await periods.Query(true).Include(x => x.Activities).Include(x => x.Documents).Include(x => x.Evaluations).SingleOrDefaultAsync(x => x.Id == r.Id, ct) ?? throw new NotFoundApplicationException(ErrorKeys.WorkplacePeriodNotFound);
+        TenantScope.Ensure(current, p.OrganizationId);
+        WorkplaceDtoFactory.EnsureTrainerVisibility(p, current);
         if (await periods.OverlapsAsync(p.EnrollmentId, r.StartDate, r.EndDate, p.Id, ct))
             throw new ConflictApplicationException(ErrorKeys.WorkplacePeriodOverlap);
         p.UpdateDetails(r.Company, r.City, r.TutorName, r.TutorEmail, r.TutorPhone, r.StartDate, r.EndDate, WorkplaceDtoFactory.Minutes(r.PlannedHours), r.TrainerVisible, r.Notes);
@@ -132,11 +187,13 @@ public sealed class UpdateWorkplacePeriodCommandHandler(IWorkplacePeriodReposito
     }
 }
 
-public sealed class UpdateWorkplaceHoursCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<UpdateWorkplaceHoursCommand, WorkplacePeriodDto>
+public sealed class UpdateWorkplaceHoursCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateWorkplaceHoursCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(UpdateWorkplaceHoursCommand r, CancellationToken ct)
     {
         var p = await Load(periods, r.Id, ct);
+        TenantScope.Ensure(current, p.OrganizationId);
+        WorkplaceDtoFactory.EnsureTrainerVisibility(p, current);
         p.RecordCompletedMinutes(WorkplaceDtoFactory.Minutes(r.CompletedHours), r.TutorObservation);
         return await WorkplaceDtoFactory.Period(p, people, profiles, enrollments, mapper, ct);
     }
@@ -145,12 +202,14 @@ public sealed class UpdateWorkplaceHoursCommandHandler(IWorkplacePeriodRepositor
     internal static async Task<WorkplacePeriod> Load(IWorkplacePeriodRepository p, WorkplacePeriodId id, CancellationToken ct) => await Q(p, id, ct) ?? throw new NotFoundApplicationException(ErrorKeys.WorkplacePeriodNotFound);
 }
 
-public sealed class UpdateWorkplaceActivityCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<UpdateWorkplaceActivityCommand, WorkplacePeriodDto>
+public sealed class UpdateWorkplaceActivityCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateWorkplaceActivityCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(UpdateWorkplaceActivityCommand r, CancellationToken ct)
     {
         var p = await UpdateWorkplaceHoursCommandHandler.Load(periods, r.PeriodId, ct);
-        if (!WorkplaceDtoFactory.TryActivity(r.Status, out var s))
+        TenantScope.Ensure(current, p.OrganizationId);
+        WorkplaceDtoFactory.EnsureTrainerVisibility(p, current);
+        if (!WorkplaceDtoFactory.TryActivity(r.Status, out var s) || !Enum.IsDefined(s))
             throw new ValidationApplicationException(ErrorKeys.WorkplaceActivityStatusInvalid);
         try
         {
@@ -165,16 +224,32 @@ public sealed class UpdateWorkplaceActivityCommandHandler(IWorkplacePeriodReposi
     }
 }
 
-public sealed class UpdateWorkplaceDocumentCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<UpdateWorkplaceDocumentCommand, WorkplacePeriodDto>
+public sealed class UpdateWorkplaceDocumentCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IDocumentRepository documents, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateWorkplaceDocumentCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(UpdateWorkplaceDocumentCommand r, CancellationToken ct)
     {
         var p = await UpdateWorkplaceHoursCommandHandler.Load(periods, r.PeriodId, ct);
-        if (!WorkplaceDtoFactory.TryDocument(r.Status, out var s))
+        TenantScope.Ensure(current, p.OrganizationId);
+        WorkplaceDtoFactory.EnsureTrainerVisibility(p, current);
+        if (!WorkplaceDtoFactory.TryDocument(r.Status, out var s) || !Enum.IsDefined(s))
             throw new ValidationApplicationException(ErrorKeys.WorkplaceDocumentStatusInvalid);
+        if (s != WorkplaceDocumentStatus.Missing && !r.DocumentId.HasValue
+            && !(s == WorkplaceDocumentStatus.Available && p.Documents.Any(x => x.Id == r.ItemId && x.Code == "AGREEMENT")))
+            throw new ValidationApplicationException(ErrorKeys.WorkplaceDocumentRequired);
+        if (r.DocumentId.HasValue && !await documents.Query(false).AnyAsync(x => x.Id.Value == r.DocumentId.Value
+            && x.OrganizationId == p.OrganizationId && x.Status == PedagoraPilot.Domain.Documents.DocumentStatus.Active
+            && x.Versions.OrderByDescending(v => v.VersionNumber).Take(1)
+                .Any(v => v.BlobAvailable && v.SecurityStatus == PedagoraPilot.Domain.Documents.DocumentSecurityStatus.Clean)
+            && (x.Category == PedagoraPilot.Domain.Documents.DocumentCategory.Internship
+                || x.Category == PedagoraPilot.Domain.Documents.DocumentCategory.Administrative)
+            && (!x.CohortId.HasValue || x.CohortId == p.CohortId.Value)
+            && ((x.OwnerType == PedagoraPilot.Domain.Documents.DocumentOwnerType.Enrollment && x.OwnerId == p.EnrollmentId.Value)
+                || (x.OwnerType == PedagoraPilot.Domain.Documents.DocumentOwnerType.WorkplacePeriod && x.OwnerId == p.Id.Value)
+                || (x.OwnerType == PedagoraPilot.Domain.Documents.DocumentOwnerType.Cohort && x.OwnerId == p.CohortId.Value)), ct))
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
         try
         {
-            p.SetDocument(r.ItemId, s, r.DocumentId);
+            p.SetDocument(r.ItemId, s, s == WorkplaceDocumentStatus.Missing ? null : r.DocumentId);
         }
         catch (DomainException e)when (e.Message == "WORKPLACE_DOCUMENT_ITEM_NOT_FOUND")
         {
@@ -185,14 +260,19 @@ public sealed class UpdateWorkplaceDocumentCommandHandler(IWorkplacePeriodReposi
     }
 }
 
-public sealed class RecordWorkplaceEvaluationCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<RecordWorkplaceEvaluationCommand, WorkplacePeriodDto>
+public sealed class RecordWorkplaceEvaluationCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordWorkplaceEvaluationCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(RecordWorkplaceEvaluationCommand r, CancellationToken ct)
     {
         var p = await UpdateWorkplaceHoursCommandHandler.Load(periods, r.PeriodId, ct);
-        if (!WorkplaceDtoFactory.TryEvaluation(r.Kind, out var k))
+        TenantScope.Ensure(current, p.OrganizationId);
+        WorkplaceDtoFactory.EnsureTrainerVisibility(p, current);
+        if (!WorkplaceDtoFactory.TryEvaluation(r.Kind, out var k) || !Enum.IsDefined(k))
             throw new ValidationApplicationException(ErrorKeys.WorkplaceEvaluationKindInvalid);
-        p.AddEvaluation(k, r.EvaluatorDisplayName, r.EvaluatedAtUtc ?? DateTimeOffset.UtcNow, r.Summary, r.Strengths, r.ImprovementAreas, r.Validated);
+        var evaluator = current.DisplayName ?? current.Email ?? current.UserId?.ToString("D");
+        if (string.IsNullOrWhiteSpace(evaluator))
+            throw new ValidationApplicationException(ErrorKeys.WorkplaceEvaluatorRequired);
+        p.AddEvaluation(k, evaluator, DateTimeOffset.UtcNow, r.Summary, r.Strengths, r.ImprovementAreas, r.Validated);
         return await WorkplaceDtoFactory.Period(p, people, profiles, enrollments, mapper, ct);
     }
 }

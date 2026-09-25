@@ -1,3 +1,4 @@
+using PedagoraPilot.Application.Abstractions.Security;
 using DomainRelay.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Abstractions.Persistence;
@@ -6,10 +7,11 @@ using PedagoraPilot.Contracts.Catalog;
 using PedagoraPilot.Domain.Catalog;
 
 namespace PedagoraPilot.Application.Catalog.Programs;
-public sealed class CreateProgramCommandHandler(IProgramFamilyRepository families, ITrainingProgramRepository programs) : IRequestHandler<CreateProgramCommand, TrainingProgramDto>
+public sealed class CreateProgramCommandHandler(IProgramFamilyRepository families, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<CreateProgramCommand, TrainingProgramDto>
 {
     public async Task<TrainingProgramDto> Handle(CreateProgramCommand r, CancellationToken ct)
     {
+        TenantScope.RequirePlatform(current);
         var family = await families.GetByCodeAsync(r.FamilyCode, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramFamilyNotFound);
         if (await programs.CodeExistsAsync(r.Code, null, ct))
             throw new ConflictApplicationException(ErrorKeys.ProgramCodeAlreadyExists);
@@ -21,10 +23,11 @@ public sealed class CreateProgramCommandHandler(IProgramFamilyRepository familie
     }
 }
 
-public sealed class UpdateProgramCommandHandler(IProgramFamilyRepository families, ITrainingProgramRepository programs, IProgramOfferingRepository offerings) : IRequestHandler<UpdateProgramCommand, TrainingProgramDto>
+public sealed class UpdateProgramCommandHandler(IProgramFamilyRepository families, ITrainingProgramRepository programs, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<UpdateProgramCommand, TrainingProgramDto>
 {
     public async Task<TrainingProgramDto> Handle(UpdateProgramCommand r, CancellationToken ct)
     {
+        TenantScope.RequirePlatform(current);
         var p = await programs.GetByIdAsync(r.Id, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramNotFound);
         var family = await families.GetByCodeAsync(r.FamilyCode, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramFamilyNotFound);
         if (!Enum.TryParse<ProgramStatus>(r.Status, true, out var status))
@@ -35,12 +38,13 @@ public sealed class UpdateProgramCommandHandler(IProgramFamilyRepository familie
     }
 }
 
-public sealed class SetProgramOfferingCommandHandler(ITrainingProgramRepository programs, ITrainingSiteRepository sites, IProgramOfferingRepository offerings) : IRequestHandler<SetProgramOfferingCommand, ProgramOfferingDto>
+public sealed class SetProgramOfferingCommandHandler(ITrainingProgramRepository programs, ITrainingSiteRepository sites, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<SetProgramOfferingCommand, ProgramOfferingDto>
 {
     public async Task<ProgramOfferingDto> Handle(SetProgramOfferingCommand r, CancellationToken ct)
     {
         var p = await programs.GetByIdAsync(r.ProgramId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramNotFound);
         var s = await sites.GetByIdAsync(r.SiteId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SiteNotFound);
+        TenantScope.Ensure(current, s.OrganizationId);
         var x = await offerings.GetAsync(r.SiteId, r.ProgramId, true, ct);
         if (x is null)
         {

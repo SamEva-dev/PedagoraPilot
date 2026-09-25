@@ -1,3 +1,4 @@
+using PedagoraPilot.Application.Abstractions.Security;
 using DomainRelay.Abstractions;
 using DomainRelay.Mapping.Abstractions.Services;
 using Microsoft.EntityFrameworkCore;
@@ -10,14 +11,15 @@ using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Training;
 
 namespace PedagoraPilot.Application.Training.Cohorts;
-public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, IReferentialVersionRepository referentialVersions, IReferentialRepository referentials, IObjectMapper mapper) : IRequestHandler<CreateCohortCommand, CohortDto>
+public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, IReferentialVersionRepository referentialVersions, IReferentialRepository referentials, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<CreateCohortCommand, CohortDto>
 {
     public async Task<CohortDto> Handle(CreateCohortCommand request, CancellationToken ct)
     {
         var offering = await offerings.GetByIdAsync(request.ProgramOfferingId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
+        var site = await sites.GetByIdAsync(offering.SiteId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SiteNotFound);
+        TenantScope.Ensure(current, site.OrganizationId);
         if (!offering.IsActive)
             throw new ConflictApplicationException(ErrorKeys.ProgramOfferingInactive);
-        var site = await sites.GetByIdAsync(offering.SiteId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SiteNotFound);
         var referentialVersion = await referentialVersions.GetByIdAsync(request.ReferentialVersionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialVersionNotFound);
         if (referentialVersion.Status != ReferentialVersionStatus.Active)
             throw new ConflictApplicationException(ErrorKeys.ReferentialVersionNotActive);
@@ -38,11 +40,12 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
     }
 }
 
-public sealed class UpdateCohortCommandHandler(ICohortRepository cohorts, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<UpdateCohortCommand, CohortDto>
+public sealed class UpdateCohortCommandHandler(ICohortRepository cohorts, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateCohortCommand, CohortDto>
 {
     public async Task<CohortDto> Handle(UpdateCohortCommand request, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(request.Id, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        TenantScope.Ensure(current, cohort.OrganizationId);
         if (!Enum.TryParse<CohortStatus>(request.Status, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.CohortStatusInvalid);
         var learnerCount = await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
@@ -53,11 +56,16 @@ public sealed class UpdateCohortCommandHandler(ICohortRepository cohorts, IEnrol
     }
 }
 
-public sealed class GetCohortsQueryHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, IObjectMapper mapper) : IRequestHandler<GetCohortsQuery, IReadOnlyCollection<CohortDto>>
+public sealed class GetCohortsQueryHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetCohortsQuery, IReadOnlyCollection<CohortDto>>
 {
     public async Task<IReadOnlyCollection<CohortDto>> Handle(GetCohortsQuery request, CancellationToken ct)
     {
         var query = cohorts.Query(false);
+        var organizationId = TenantScope.Organization(current);
+        if (organizationId.HasValue)
+            query = query.Where(x => x.OrganizationId == organizationId.Value);
+        if (request.OrganizationId.HasValue)
+            TenantScope.Ensure(current, request.OrganizationId.Value);
         if (request.OrganizationId.HasValue)
             query = query.Where(x => x.OrganizationId == request.OrganizationId.Value);
         if (request.SiteId.HasValue)
@@ -69,13 +77,14 @@ public sealed class GetCohortsQueryHandler(ICohortRepository cohorts, IProgramOf
         }
 
         var items = await query.OrderByDescending(x => x.StartDate).ThenBy(x => x.Name).ToListAsync(ct);
-        var result = new List<CohortDto>(items.Count);
-        foreach (var cohort in items)
-        {
-            var count = await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
-            result.Add(CreateCohortCommandHandler.ToDto(cohort, count, mapper));
-        }
-
-        return result;
+        if (items.Count == 0) return Array.Empty<CohortDto>();
+        var ids = items.Select(x => x.Id).ToArray();
+        var counts = await enrollments.Query(false)
+            .Where(x => ids.Contains(x.CohortId) && x.Status == EnrollmentStatus.Active)
+            .GroupBy(x => x.CohortId)
+            .Select(group => new { CohortId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.CohortId, x => x.Count, ct);
+        return items.Select(cohort => CreateCohortCommandHandler.ToDto(
+            cohort, counts.GetValueOrDefault(cohort.Id), mapper)).ToArray();
     }
 }
