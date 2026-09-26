@@ -6,6 +6,7 @@ using DomainRelay.Validation;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using PedagoraPilot.Application.Common.Behaviors;
+using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Mapping;
 using PedagoraPilot.Application.Training.Delivery;
 using PedagoraPilot.Application.Organizations.Provision;
@@ -46,6 +47,9 @@ public static class DependencyInjection
 
         services.AddDomainRelayValidation();
         services.AddDomainRelayDiagnostics();
+        services.AddScoped<ITransactionCompensation, TransactionCompensation>();
+        services.AddScoped<DocumentContextualAccess>();
+        services.AddScoped<WorkplaceContextualAccess>();
         services.AddTransient(typeof(IPipelineBehavior<, >), typeof(UnitOfWorkBehavior<, >));
         services.AddTransient(typeof(IPipelineBehavior<, >), typeof(AuditBehavior<, >));
         services.AddTransient<IValidator<ProvisionOrganizationCommand>, ProvisionOrganizationCommandValidator>();

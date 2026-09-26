@@ -18,6 +18,7 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
         var offering = await offerings.GetByIdAsync(request.ProgramOfferingId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
         var site = await sites.GetByIdAsync(offering.SiteId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SiteNotFound);
         TenantScope.Ensure(current, site.OrganizationId);
+        ContextualScope.EnsureCanManageProgram(current, site.Id, offering.ProgramId);
         if (!offering.IsActive)
             throw new ConflictApplicationException(ErrorKeys.ProgramOfferingInactive);
         var referentialVersion = await referentialVersions.GetByIdAsync(request.ReferentialVersionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialVersionNotFound);
@@ -40,12 +41,15 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
     }
 }
 
-public sealed class UpdateCohortCommandHandler(ICohortRepository cohorts, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateCohortCommand, CohortDto>
+public sealed class UpdateCohortCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateCohortCommand, CohortDto>
 {
     public async Task<CohortDto> Handle(UpdateCohortCommand request, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(request.Id, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         TenantScope.Ensure(current, cohort.OrganizationId);
+        var offering = await offerings.GetByIdAsync(cohort.ProgramOfferingId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
+        ContextualScope.EnsureCanManageCohort(current, cohort.SiteId, offering.ProgramId, cohort.Id.Value);
         if (!Enum.TryParse<CohortStatus>(request.Status, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.CohortStatusInvalid);
         var learnerCount = await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
@@ -78,6 +82,18 @@ public sealed class GetCohortsQueryHandler(ICohortRepository cohorts, IProgramOf
 
         var items = await query.OrderByDescending(x => x.StartDate).ThenBy(x => x.Name).ToListAsync(ct);
         if (items.Count == 0) return Array.Empty<CohortDto>();
+
+        if (current.HasContextualScopeRestrictions)
+        {
+            var offeringIdsForScope = items.Select(x => x.ProgramOfferingId).Distinct().ToArray();
+            var programByOffering = await offerings.Query(false)
+                .Where(x => offeringIdsForScope.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.ProgramId, ct);
+            items = items.Where(x => programByOffering.TryGetValue(x.ProgramOfferingId, out var programId)
+                && current.CanViewCohort(x.SiteId, programId, x.Id.Value)).ToList();
+            if (items.Count == 0) return Array.Empty<CohortDto>();
+        }
+
         var ids = items.Select(x => x.Id).ToArray();
         var counts = await enrollments.Query(false)
             .Where(x => ids.Contains(x.CohortId) && x.Status == EnrollmentStatus.Active)

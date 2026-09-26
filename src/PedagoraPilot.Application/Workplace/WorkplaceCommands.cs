@@ -1,15 +1,16 @@
 using DomainRelay.Abstractions;
+using PedagoraPilot.Application.Abstractions.Messaging;
 using FluentValidation;
 using PedagoraPilot.Contracts.Workplace;
 using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Application.Workplace;
-public sealed record CreateWorkplacePeriodCommand(EnrollmentId EnrollmentId, string PeriodTypeCode, string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, bool AgreementReceived, string? Notes) : IRequest<WorkplacePeriodDto>;
-public sealed record UpdateWorkplacePeriodCommand(WorkplacePeriodId Id, string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, bool TrainerVisible, string? Notes) : IRequest<WorkplacePeriodDto>;
-public sealed record UpdateWorkplaceHoursCommand(WorkplacePeriodId Id, decimal CompletedHours, string? TutorObservation) : IRequest<WorkplacePeriodDto>;
-public sealed record UpdateWorkplaceActivityCommand(WorkplacePeriodId PeriodId, WorkplaceActivityId ActivityId, string Status, string? Comment) : IRequest<WorkplacePeriodDto>;
-public sealed record UpdateWorkplaceDocumentCommand(WorkplacePeriodId PeriodId, WorkplaceDocumentChecklistItemId ItemId, string Status, Guid? DocumentId) : IRequest<WorkplacePeriodDto>;
-public sealed record RecordWorkplaceEvaluationCommand(WorkplacePeriodId PeriodId, string Kind, string EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc, string Summary, string? Strengths, string? ImprovementAreas, bool? Validated) : IRequest<WorkplacePeriodDto>;
+public sealed record CreateWorkplacePeriodCommand(EnrollmentId EnrollmentId, string PeriodTypeCode, string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, bool AgreementReceived, string? Notes) : ICommand<WorkplacePeriodDto>;
+public sealed record UpdateWorkplacePeriodCommand(WorkplacePeriodId Id, string Company, string City, string TutorName, string? TutorEmail, string? TutorPhone, DateOnly StartDate, DateOnly EndDate, decimal PlannedHours, bool TrainerVisible, string? Notes) : ICommand<WorkplacePeriodDto>;
+public sealed record UpdateWorkplaceHoursCommand(WorkplacePeriodId Id, decimal CompletedHours, string? TutorObservation) : ICommand<WorkplacePeriodDto>;
+public sealed record UpdateWorkplaceActivityCommand(WorkplacePeriodId PeriodId, WorkplaceActivityId ActivityId, string Status, string? Comment) : ICommand<WorkplacePeriodDto>;
+public sealed record UpdateWorkplaceDocumentCommand(WorkplacePeriodId PeriodId, WorkplaceDocumentChecklistItemId ItemId, string Status, Guid? DocumentId) : ICommand<WorkplacePeriodDto>;
+public sealed record RecordWorkplaceEvaluationCommand(WorkplacePeriodId PeriodId, string Kind, string EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc, string Summary, string? Strengths, string? ImprovementAreas, bool? Validated) : ICommand<WorkplacePeriodDto>;
 public sealed class CreateWorkplacePeriodCommandValidator : AbstractValidator<CreateWorkplacePeriodCommand>
 {
     public CreateWorkplacePeriodCommandValidator()

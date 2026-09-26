@@ -1,11 +1,12 @@
 using DomainRelay.Abstractions;
+using PedagoraPilot.Application.Abstractions.Messaging;
 using FluentValidation;
 using PedagoraPilot.Contracts.Catalog;
 
 namespace PedagoraPilot.Application.Catalog.Programs;
-public sealed record CreateProgramCommand(string FamilyCode, string Code, string Name, string DescriptionKey, string Icon, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules, string? ExternalKey) : IRequest<TrainingProgramDto>;
-public sealed record UpdateProgramCommand(Guid Id, string FamilyCode, string Name, string DescriptionKey, string Icon, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules) : IRequest<TrainingProgramDto>;
-public sealed record SetProgramOfferingCommand(Guid ProgramId, Guid SiteId, bool Active) : IRequest<ProgramOfferingDto>;
+public sealed record CreateProgramCommand(string FamilyCode, string Code, string Name, string DescriptionKey, string Icon, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules, string? ExternalKey) : ICommand<TrainingProgramDto>;
+public sealed record UpdateProgramCommand(Guid Id, string FamilyCode, string Name, string DescriptionKey, string Icon, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules) : ICommand<TrainingProgramDto>;
+public sealed record SetProgramOfferingCommand(Guid ProgramId, Guid SiteId, bool Active) : ICommand<ProgramOfferingDto>;
 public sealed class CreateProgramCommandValidator : AbstractValidator<CreateProgramCommand>
 {
     public CreateProgramCommandValidator()

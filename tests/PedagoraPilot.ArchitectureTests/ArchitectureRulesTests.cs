@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NetArchTest.Rules;
 using PedagoraPilot.Application;
+using PedagoraPilot.Application.Abstractions.Messaging;
 using PedagoraPilot.Domain.Common;
 using PedagoraPilot.Infrastructure.Persistence;
 using Xunit;
@@ -35,4 +36,21 @@ public sealed class ArchitectureRulesTests
         var result = Types.InAssembly(typeof(PedagoraPilot.Contracts.Common.ApiErrorResponse).Assembly).ShouldNot().HaveDependencyOnAny("PedagoraPilot.Application", "PedagoraPilot.Infrastructure", "PedagoraPilot.Api").GetResult();
         result.IsSuccessful.Should().BeTrue();
     }
+    [Fact]
+    public void Application_commands_must_be_transactional_commands()
+    {
+        var commandTypes = typeof(DependencyInjection).Assembly
+            .GetTypes()
+            .Where(type => type is { IsAbstract: false, IsInterface: false } && type.Name.EndsWith("Command", StringComparison.Ordinal));
+
+        var offenders = commandTypes
+            .Where(type => !type.GetInterfaces().Any(@interface =>
+                @interface.IsGenericType && @interface.GetGenericTypeDefinition() == typeof(ICommand<>)))
+            .Select(type => type.FullName)
+            .OrderBy(name => name)
+            .ToArray();
+
+        offenders.Should().BeEmpty("every application mutation command must pass through UnitOfWorkBehavior");
+    }
+
 }

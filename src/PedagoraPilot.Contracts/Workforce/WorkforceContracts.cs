@@ -5,3 +5,5 @@ public sealed record CreateRemoteWorkRequest(Guid SiteId, DateOnly Date, string 
 public sealed record RemoteWorkActivityInput(string Code, string Label);
 public sealed record RecordRemoteWorkDecisionRequest(bool Approved);
 public sealed record UpdateRemoteWorkActivityRequest(string Status);
+public sealed record RemoteWorkPolicyDto(bool Enabled, bool ApprovalRequired, int MaxDaysPerWeek, bool HalfDayAllowed, bool EndOfDayReport);
+

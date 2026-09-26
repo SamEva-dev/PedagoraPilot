@@ -1,5 +1,6 @@
 using PedagoraPilot.Application.Abstractions.Security;
 using DomainRelay.Abstractions;
+using PedagoraPilot.Domain.Training;
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Common.Errors;
@@ -38,20 +39,26 @@ public sealed class UpdateProgramCommandHandler(IProgramFamilyRepository familie
     }
 }
 
-public sealed class SetProgramOfferingCommandHandler(ITrainingProgramRepository programs, ITrainingSiteRepository sites, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<SetProgramOfferingCommand, ProgramOfferingDto>
+public sealed class SetProgramOfferingCommandHandler(ITrainingProgramRepository programs, ITrainingSiteRepository sites, IProgramOfferingRepository offerings, ICohortRepository cohorts, ICurrentUser current) : IRequestHandler<SetProgramOfferingCommand, ProgramOfferingDto>
 {
     public async Task<ProgramOfferingDto> Handle(SetProgramOfferingCommand r, CancellationToken ct)
     {
         var p = await programs.GetByIdAsync(r.ProgramId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramNotFound);
         var s = await sites.GetByIdAsync(r.SiteId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SiteNotFound);
         TenantScope.Ensure(current, s.OrganizationId);
+        ContextualScope.EnsureCanManageProgram(current, s.Id, p.Id);
         var x = await offerings.GetAsync(r.SiteId, r.ProgramId, true, ct);
         if (x is null)
         {
+            if (!r.Active)
+                throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
             x = ProgramOffering.Create(r.SiteId, r.ProgramId, $"off-{s.Code.Value.ToLowerInvariant()}-{p.Code.Value.ToLowerInvariant()}");
             await offerings.AddAsync(x, ct);
         }
 
+        if (!r.Active && await cohorts.Query(false).AnyAsync(c => c.ProgramOfferingId == x.Id
+            && c.Status != CohortStatus.Completed && c.Status != CohortStatus.Cancelled, ct))
+            throw new ConflictApplicationException(ErrorKeys.ProgramOfferingActiveCohorts);
         x.SetActive(r.Active);
         return new ProgramOfferingDto(x.Id, x.ExternalKey ?? x.Id.ToString(), x.SiteId, s.ExternalKey ?? x.SiteId.ToString(), x.ProgramId, p.ExternalKey ?? x.ProgramId.ToString(), x.IsActive);
     }

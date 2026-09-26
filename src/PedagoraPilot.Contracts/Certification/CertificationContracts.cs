@@ -4,7 +4,12 @@ public sealed record CertificationStepDto(Guid Id, Guid? UnitId, string Code, st
 public sealed record CertificationSchemeDto(Guid Id, Guid ReferentialVersionId, string Code, string Name, string Status, DateOnly? EffectiveFrom, DateOnly? EffectiveTo, IReadOnlyCollection<CertificationUnitDto> Units, IReadOnlyCollection<CertificationStepDto> Steps);
 public sealed record CertificationExamSessionDto(Guid Id, Guid OrganizationId, Guid SiteId, Guid CohortId, Guid SchemeId, string Title, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string? Venue, string Status);
 public sealed record CertificationAssessmentDto(Guid Id, Guid StepDefinitionId, string JuryDisplayName, string Outcome, decimal? Score, string? Comment, DateTimeOffset RecordedAtUtc);
-public sealed record CertificationCandidateDto(Guid Id, Guid ExamSessionId, Guid EnrollmentId, string Status, bool? Eligible, string Decision, string? DecisionComment, DateTime? DecisionAtUtc, IReadOnlyCollection<CertificationAssessmentDto> Assessments);
+public sealed record CertificationCandidateDto(Guid Id, Guid ExamSessionId, Guid EnrollmentId, string Status, bool? Eligible, string Decision, string? DecisionComment, DateTime? DecisionAtUtc, IReadOnlyCollection<CertificationAssessmentDto> Assessments)
+{
+    public string FirstName { get; init; } = string.Empty;
+    public string LastName { get; init; } = string.Empty;
+    public string CandidateNumber { get; init; } = string.Empty;
+}
 public sealed record JuryAssignmentDto(Guid Id, Guid ExamSessionId, Guid AuthGateUserId, string DisplayName, string Role, DateTimeOffset AssignedAtUtc);
 public sealed record CreateCertificationExamSessionRequest(Guid CohortId, Guid SchemeId, string Title, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string? Venue);
 public sealed record AssignJuryRequest(Guid AuthGateUserId, string DisplayName, string Role);

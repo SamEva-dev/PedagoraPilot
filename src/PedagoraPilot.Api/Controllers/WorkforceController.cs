@@ -16,6 +16,10 @@ public sealed class WorkforceController(IMediator mediator) : ControllerBase
     [HttpGet]
     [HasPermission(PedagoraPilotPermissionCodes.RemoteWork.View)]
     public async Task<ActionResult<IReadOnlyCollection<RemoteWorkRequestDto>>> List([FromQuery] Guid? siteId, [FromQuery] bool mineOnly = false, CancellationToken ct = default) => Ok(await mediator.Send(new GetRemoteWorkRequestsQuery(siteId, mineOnly), ct));
+    [HttpGet("policy")]
+    [HasPermission(PedagoraPilotPermissionCodes.RemoteWork.View)]
+    public async Task<ActionResult<RemoteWorkPolicyDto>> Policy(CancellationToken ct)
+        => Ok(await mediator.Send(new GetRemoteWorkPolicyQuery(), ct));
     [HttpPost]
     [HasPermission(PedagoraPilotPermissionCodes.RemoteWork.View)]
     public async Task<ActionResult<RemoteWorkRequestDto>> Create([FromBody] CreateRemoteWorkRequest r, CancellationToken ct) => Ok(await mediator.Send(new CreateRemoteWorkCommand(r.SiteId, r.Date, r.Period, r.StartTime, r.EndTime, r.Comment, r.Activities), ct));

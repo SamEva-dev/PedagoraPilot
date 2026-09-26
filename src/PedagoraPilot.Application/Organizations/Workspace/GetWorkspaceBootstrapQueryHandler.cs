@@ -46,10 +46,14 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
             ? []
             : await sites.Query(false)
                 .Where(x =>
-                    x.Status == PedagoraPilot.Domain.Organizations.TrainingSiteStatus.Active &&
+                    (x.Status == PedagoraPilot.Domain.Organizations.TrainingSiteStatus.Active ||
+                     x.Status == PedagoraPilot.Domain.Organizations.TrainingSiteStatus.Attention) &&
                     organizationIds.Contains(x.OrganizationId))
                 .OrderBy(x => x.Name)
                 .ToListAsync(ct);
+
+        if (currentUser.HasContextualScopeRestrictions)
+            ss = ss.Where(x => currentUser.CanViewSite(x.Id)).ToList();
 
         var siteIds = ss.Select(x => x.Id).ToArray();
 
@@ -58,6 +62,9 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
             : await offerings.Query(false)
                 .Where(x => x.IsActive && siteIds.Contains(x.SiteId))
                 .ToListAsync(ct);
+
+        if (currentUser.HasContextualScopeRestrictions)
+            oo = oo.Where(x => currentUser.CanViewProgram(x.SiteId, x.ProgramId)).ToList();
 
         var visibleProgramIds = oo.Select(x => x.ProgramId).Distinct().ToArray();
 
@@ -100,17 +107,24 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
                 .OrderByDescending(x => x.StartDate)
                 .ToListAsync(ct);
 
+        if (currentUser.HasContextualScopeRestrictions)
+        {
+            var offeringPrograms = oo.ToDictionary(x => x.Id, x => x.ProgramId);
+            cc = cc.Where(x => offeringPrograms.TryGetValue(x.ProgramOfferingId, out var programId)
+                && currentUser.CanViewCohort(x.SiteId, programId, x.Id.Value)).ToList();
+        }
+
         var orgDtos = orgs.Select(x =>
             new WorkspaceOrganizationDto(
                 x.Id,
                 $"org-{x.Code.Value.ToLowerInvariant()}",
                 x.Code.Value,
                 x.LegalName,
-                x.LegalName,
-                string.Empty,
+                string.IsNullOrWhiteSpace(x.ShortName) ? x.LegalName : x.ShortName,
+                x.City ?? string.Empty,
                 x.Status == Domain.Organizations.OrganizationStatus.Active,
-                string.Empty,
-                string.Empty))
+                x.PrimaryColor ?? string.Empty,
+                x.SecondaryColor ?? string.Empty))
             .ToArray();
 
         var siteDtos = ss.Select(x =>
@@ -124,6 +138,12 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
                 x.Code.Value,
                 x.Name,
                 x.City,
+                x.Address,
+                x.PostalCode,
+                x.Phone,
+                x.Email,
+                x.Manager,
+                x.Status.ToString().ToLowerInvariant(),
                 x.IsActive);
         }).ToArray();
 

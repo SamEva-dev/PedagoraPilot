@@ -18,6 +18,11 @@ public sealed class TrainingSiteConfiguration : IEntityTypeConfiguration<Trainin
         });
         b.Property(x => x.Name).HasMaxLength(160).IsRequired();
         b.Property(x => x.City).HasMaxLength(120).IsRequired();
+        b.Property(x => x.Address).HasMaxLength(240).IsRequired();
+        b.Property(x => x.PostalCode).HasMaxLength(32).IsRequired();
+        b.Property(x => x.Phone).HasMaxLength(40).IsRequired();
+        b.Property(x => x.Email).HasMaxLength(240).IsRequired();
+        b.Property(x => x.Manager).HasMaxLength(160).IsRequired();
         b.Property(x => x.ExternalKey).HasMaxLength(80);
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
         b.Property(x => x.CreatedAtUtc).IsRequired();

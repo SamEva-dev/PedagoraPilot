@@ -13,5 +13,6 @@
     <PackageReference Include="DomainRelay.Mapping.Abstractions" />
     <PackageReference Include="DomainRelay.Mapping.DependencyInjection" />
     <PackageReference Include="FluentValidation" />
+    <PackageReference Include="PedagoraPilot.Security.Contracts" />
   </ItemGroup>
 </Project>

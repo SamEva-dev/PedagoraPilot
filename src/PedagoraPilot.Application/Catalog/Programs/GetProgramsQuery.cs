@@ -17,12 +17,17 @@ public sealed class GetProgramsQueryHandler(ITrainingProgramRepository programs,
         var ps = await programs.Query(false).OrderBy(x => x.Name).ToListAsync(ct);
         var caps = await programs.GetCapabilitiesAsync(ps.Select(x => x.Id), ct);
         var fs = await families.Query(false).ToDictionaryAsync(x => x.Id, x => x.Code, ct);
-        var ss = await sites.Query(false)
+        var siteList = await sites.Query(false)
             .Where(x => !effectiveOrganization.HasValue || x.OrganizationId == effectiveOrganization.Value)
-            .ToDictionaryAsync(x => x.Id, ct);
+            .ToListAsync(ct);
+        if (current.HasContextualScopeRestrictions)
+            siteList = siteList.Where(x => current.CanViewSite(x.Id)).ToList();
+        var ss = siteList.ToDictionary(x => x.Id);
         var siteIds = ss.Keys.ToArray();
         var os = await offerings.Query(false)
             .Where(x => x.IsActive && siteIds.Contains(x.SiteId)).ToListAsync(ct);
+        if (current.HasContextualScopeRestrictions)
+            os = os.Where(x => current.CanViewProgram(x.SiteId, x.ProgramId)).ToList();
         var rs = await refs.Query(false).ToListAsync(ct);
         var vs = await versions.Query(false).Where(x => x.Status == Domain.Catalog.ReferentialVersionStatus.Active).OrderByDescending(x => x.EffectiveFrom).ToListAsync(ct);
         var result = new List<TrainingProgramDto>();

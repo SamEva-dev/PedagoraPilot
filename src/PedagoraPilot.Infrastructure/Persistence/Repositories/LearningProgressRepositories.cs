@@ -20,7 +20,8 @@ public sealed class PedagogicalTopicRepository(PedagoraPilotDbContext db) : Repo
 
 public sealed class LearnerTopicProgressRepository(PedagoraPilotDbContext db) : Repository<LearnerTopicProgress, LearnerTopicProgressId>(db), ILearnerTopicProgressRepository
 {
-    public Task<LearnerTopicProgress?> FindAsync(EnrollmentId enrollmentId, PedagogicalTopicId topicId, bool isTracking = false, CancellationToken ct = default) => Query(isTracking).SingleOrDefaultAsync(x => x.EnrollmentId == enrollmentId && x.TopicId == topicId, ct);
+    public Task<LearnerTopicProgress?> FindAsync(EnrollmentId enrollmentId, PedagogicalTopicId topicId, bool isTracking = false, CancellationToken ct = default) =>
+        Query(isTracking).Include(x => x.EvaluationCriteria).SingleOrDefaultAsync(x => x.EnrollmentId == enrollmentId && x.TopicId == topicId, ct);
 }
 
 public sealed class DrivingEvaluationRepository(PedagoraPilotDbContext db) : Repository<DrivingEvaluation, DrivingEvaluationId>(db), IDrivingEvaluationRepository

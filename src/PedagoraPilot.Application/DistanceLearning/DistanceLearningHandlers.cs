@@ -43,7 +43,10 @@ public sealed class GetDistanceLearningSessionsQueryHandler(IDistanceLearningSes
             q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
-        return (await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct)).Select(x => DlMap.Session(x, mapper)).ToArray();
+        var rows = await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct);
+        if (current.HasContextualScopeRestrictions)
+            rows = rows.Where(x => current.CanViewCohort(x.SiteId, x.ProgramId, x.CohortId.Value)).ToList();
+        return rows.Select(x => DlMap.Session(x, mapper)).ToArray();
     }
 }
 
@@ -58,6 +61,7 @@ public sealed class CreateDistanceLearningSessionCommandHandler(IDistanceLearnin
         var offering = await offerings.GetByIdAsync(cohort.ProgramOfferingId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
         if (offering.ProgramId != r.ProgramId)
             throw new ForbiddenApplicationException(ErrorKeys.DistanceForbidden);
+        ContextualScope.EnsureCanManageCohort(current, cohort.SiteId, offering.ProgramId, cohort.Id.Value);
         if (!Enum.TryParse<DistancePlatform>(r.Platform, true, out var platform))
             throw new ValidationApplicationException(ErrorKeys.DistancePlatformInvalid);
         var x = DistanceLearningSession.Create(cohort.OrganizationId, r.SiteId, r.ProgramId, cohort.Id, r.Title, r.TrainerDisplayName, r.TrainerEmail, r.StartsAtUtc, r.EndsAtUtc, platform, r.JoinUrl, r.Objectives);
@@ -73,6 +77,7 @@ public sealed class AddDistanceParticipantCommandHandler(IDistanceLearningSessio
         var x = await repo.Query(true).Include(a => a.Participants).SingleOrDefaultAsync(a => a.Id == r.SessionId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceSessionNotFound);
         var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        ContextualScope.EnsureCanManageCohort(current, x.SiteId, x.ProgramId, x.CohortId.Value);
         if (enrollment.CohortId != x.CohortId)
             throw new ConflictApplicationException(ErrorKeys.DistanceParticipantCohortMismatch);
         x.AddParticipant(r.EnrollmentId, r.DisplayName);
@@ -86,6 +91,7 @@ public sealed class ChangeDistanceSessionStatusCommandHandler(IDistanceLearningS
     {
         var x = await repo.Query(true).Include(a => a.Participants).SingleOrDefaultAsync(a => a.Id == r.SessionId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceSessionNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        ContextualScope.EnsureCanManageCohort(current, x.SiteId, x.ProgramId, x.CohortId.Value);
         if (!Enum.TryParse<DistanceLearningSessionStatus>(r.Status, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.DistanceSessionStatusInvalid);
         x.ChangeStatus(status);
@@ -99,6 +105,7 @@ public sealed class UpdateDistanceAttendanceCommandHandler(IDistanceLearningSess
     {
         var x = await repo.Query(true).Include(a => a.Participants).SingleOrDefaultAsync(a => a.Id == r.SessionId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceSessionNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        ContextualScope.EnsureCanManageCohort(current, x.SiteId, x.ProgramId, x.CohortId.Value);
         if (!Enum.TryParse<DistanceAttendanceStatus>(r.Attendance, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.DistanceAttendanceInvalid);
         x.RecordParticipantAttendance(r.ParticipantId, status, r.ConnectedAtUtc, r.DisconnectedAtUtc, r.ConnectedMinutes, r.ParticipationPercent, r.CompletedActivities, r.ActivityCount);
@@ -116,7 +123,10 @@ public sealed class GetAsyncLearningModulesQueryHandler(IAsyncLearningModuleRepo
             q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
-        return (await q.OrderBy(x => x.DueDate).ToListAsync(ct)).Select(x => DlMap.Module(x, mapper)).ToArray();
+        var rows = await q.OrderBy(x => x.DueDate).ToListAsync(ct);
+        if (current.HasContextualScopeRestrictions)
+            rows = rows.Where(x => current.CanViewCohort(x.SiteId, x.ProgramId, x.CohortId.Value)).ToList();
+        return rows.Select(x => DlMap.Module(x, mapper)).ToArray();
     }
 }
 
@@ -131,6 +141,7 @@ public sealed class CreateAsyncLearningModuleCommandHandler(IAsyncLearningModule
         var offering = await offerings.GetByIdAsync(cohort.ProgramOfferingId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramOfferingNotFound);
         if (offering.ProgramId != r.ProgramId)
             throw new ForbiddenApplicationException(ErrorKeys.DistanceForbidden);
+        ContextualScope.EnsureCanManageCohort(current, cohort.SiteId, offering.ProgramId, cohort.Id.Value);
         var x = AsyncLearningModule.Create(cohort.OrganizationId, r.SiteId, r.ProgramId, cohort.Id, r.Title, r.Description, r.EstimatedMinutes, r.DueDate, r.TrainerDisplayName, r.ExpectedStudents);
         foreach (var step in r.Steps ?? [])
             x.AddStep(step.Code, step.Label, step.SortOrder);
@@ -145,6 +156,7 @@ public sealed class UpdateAsyncModuleProgressCommandHandler(IAsyncLearningModule
     {
         var x = await repo.Query(true).Include(a => a.Steps).SingleOrDefaultAsync(a => a.Id == r.ModuleId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DistanceModuleNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        ContextualScope.EnsureCanManageCohort(current, x.SiteId, x.ProgramId, x.CohortId.Value);
         x.UpdateProgress(r.ProgressPercent, r.CompletedStudents, r.AverageScore);
         return DlMap.Module(x, mapper);
     }

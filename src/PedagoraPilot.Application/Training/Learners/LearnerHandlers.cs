@@ -11,12 +11,13 @@ using PedagoraPilot.Domain.Learning;
 using PedagoraPilot.Domain.Training;
 
 namespace PedagoraPilot.Application.Training.Learners;
-public sealed class EnrollLearnerCommandHandler(ICohortRepository cohorts, IPersonRepository persons, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<EnrollLearnerCommand, LearnerDto>
+public sealed class EnrollLearnerCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IPersonRepository persons, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<EnrollLearnerCommand, LearnerDto>
 {
     public async Task<LearnerDto> Handle(EnrollLearnerCommand request, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(request.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         TenantScope.Ensure(current, cohort.OrganizationId);
+        await LearnerContextualAccess.EnsureCohortAsync(cohort, offerings, current, manage: true, ct);
         if (cohort.Status is CohortStatus.Completed or CohortStatus.Cancelled)
             throw new ConflictApplicationException(ErrorKeys.CohortClosed);
         var activeCount = await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
@@ -63,12 +64,13 @@ public sealed class EnrollLearnerCommandHandler(ICohortRepository cohorts, IPers
     }
 }
 
-public sealed class GetCohortLearnersQueryHandler(ICohortRepository cohorts, IEnrollmentRepository enrollments, ILearnerProfileRepository learnerProfiles, IPersonRepository persons, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetCohortLearnersQuery, IReadOnlyCollection<LearnerDto>>
+public sealed class GetCohortLearnersQueryHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ILearnerProfileRepository learnerProfiles, IPersonRepository persons, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetCohortLearnersQuery, IReadOnlyCollection<LearnerDto>>
 {
     public async Task<IReadOnlyCollection<LearnerDto>> Handle(GetCohortLearnersQuery request, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(request.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         TenantScope.Ensure(current, cohort.OrganizationId);
+        await LearnerContextualAccess.EnsureCohortAsync(cohort, offerings, current, manage: false, ct);
         var enrollmentQuery = enrollments.Query(false).Where(x => x.CohortId == request.CohortId);
         if (LearnerSelfAccess.Applies(current))
         {
@@ -103,7 +105,7 @@ public sealed class GetCohortLearnersQueryHandler(ICohortRepository cohorts, IEn
     }
 }
 
-public sealed class GetLearnerQueryHandler(ILearnerProfileRepository learnerProfiles, IPersonRepository persons, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerQuery, LearnerDto>
+public sealed class GetLearnerQueryHandler(ILearnerProfileRepository learnerProfiles, IPersonRepository persons, IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerQuery, LearnerDto>
 {
     public async Task<LearnerDto> Handle(GetLearnerQuery request, CancellationToken ct)
     {
@@ -112,12 +114,13 @@ public sealed class GetLearnerQueryHandler(ILearnerProfileRepository learnerProf
         var person = await persons.GetByIdAsync(learner.PersonId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PersonNotFound);
         var enrollment = await enrollments.Query(false).Where(x => x.LearnerProfileId == learner.Id && (!organizationId.HasValue || x.OrganizationId == organizationId.Value)).OrderByDescending(x => x.EnrolledOn).FirstOrDefaultAsync(ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
+        await LearnerContextualAccess.EnsureEnrollmentAsync(enrollment, cohorts, offerings, current, manage: false, ct);
         await LearnerSelfAccess.EnsureAsync(enrollment, learnerProfiles, persons, current, ct);
         return LearnerDtoFactory.Create(enrollment, learner, person, mapper);
     }
 }
 
-public sealed class GetEnrollmentLearnerQueryHandler(IEnrollmentRepository enrollments,
+public sealed class GetEnrollmentLearnerQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings,
     ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current)
     : IRequestHandler<GetEnrollmentLearnerQuery, LearnerDto>
 {
@@ -126,6 +129,7 @@ public sealed class GetEnrollmentLearnerQueryHandler(IEnrollmentRepository enrol
         var enrollment = await enrollments.GetByIdAsync(request.EnrollmentId, false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
+        await LearnerContextualAccess.EnsureEnrollmentAsync(enrollment, cohorts, offerings, current, manage: false, ct);
         await LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
         var profile = await profiles.GetByIdAsync(enrollment.LearnerProfileId, false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
@@ -135,7 +139,7 @@ public sealed class GetEnrollmentLearnerQueryHandler(IEnrollmentRepository enrol
     }
 }
 
-public sealed class GetSelfLearnerQueryHandler(IEnrollmentRepository enrollments,
+public sealed class GetSelfLearnerQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings,
     ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current)
     : IRequestHandler<GetSelfLearnerQuery, LearnerDto>
 {
@@ -162,6 +166,7 @@ public sealed class GetSelfLearnerQueryHandler(IEnrollmentRepository enrollments
             .OrderByDescending(x => x.EnrolledOn).ThenByDescending(x => x.Id)
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
+        await LearnerContextualAccess.EnsureEnrollmentAsync(enrollment, cohorts, offerings, current, manage: false, ct);
         return LearnerDtoFactory.Create(enrollment, profile, person, mapper);
     }
 }
@@ -177,12 +182,13 @@ internal static class LearnerDtoFactory
     }
 }
 
-public sealed class ChangeEnrollmentStatusCommandHandler(IEnrollmentRepository enrollments, ILearnerProfileRepository learnerProfiles, IPersonRepository persons, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<ChangeEnrollmentStatusCommand, LearnerDto>
+public sealed class ChangeEnrollmentStatusCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ILearnerProfileRepository learnerProfiles, IPersonRepository persons, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<ChangeEnrollmentStatusCommand, LearnerDto>
 {
     public async Task<LearnerDto> Handle(ChangeEnrollmentStatusCommand request, CancellationToken ct)
     {
         var enrollment = await enrollments.GetByIdAsync(request.EnrollmentId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
+        await LearnerContextualAccess.EnsureEnrollmentAsync(enrollment, cohorts, offerings, current, manage: true, ct);
         if (!Enum.TryParse<EnrollmentStatus>(request.Status, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.EnrollmentStatusInvalid);
         enrollment.ChangeStatus(status, request.EndedOn);

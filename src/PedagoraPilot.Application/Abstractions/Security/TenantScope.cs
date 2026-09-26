@@ -5,10 +5,7 @@ namespace PedagoraPilot.Application.Abstractions.Security;
 /// <summary>Every tenant-owned resource must be checked against the authenticated scope.</summary>
 public static class TenantScope
 {
-    // AuthGate emits PlatformAdmin as a JWT alias for its global SuperAdmin role.
-    // Product-specific administrator roles still require an organization claim.
-    public static bool IsPlatformAdministrator(ICurrentUser user) =>
-        user.Roles.Contains("SuperAdmin", StringComparer.OrdinalIgnoreCase);
+    public static bool IsPlatformAdministrator(ICurrentUser user) => user.IsPlatformAdministrator;
 
     public static Guid? Organization(ICurrentUser user)
     {

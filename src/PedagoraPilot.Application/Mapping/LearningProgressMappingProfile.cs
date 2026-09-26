@@ -52,6 +52,9 @@ public sealed record PedagogicalTopicReadModel
     public int DurationMinutes { get; init; }
     public string? Reference { get; init; }
     public bool Active { get; init; }
+    public string? Objective { get; init; }
+    public string? Example { get; init; }
+    public string? Correction { get; init; }
 }
 
 public sealed record LearnerTopicProgressReadModel
@@ -65,7 +68,10 @@ public sealed record LearnerTopicProgressReadModel
     public DateOnly? PresentationDate { get; init; }
     public int? PresentationDurationMinutes { get; init; }
     public string? EvaluatorDisplayName { get; init; }
+    public string? PositivePoints { get; init; }
+    public string? Improvements { get; init; }
     public string? Comment { get; init; }
+    public string? NextObjective { get; init; }
 }
 
 public sealed record DrivingEvaluationReadModel

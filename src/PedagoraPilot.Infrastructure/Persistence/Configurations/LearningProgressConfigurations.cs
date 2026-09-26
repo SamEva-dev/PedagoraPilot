@@ -51,6 +51,9 @@ public sealed class PedagogicalTopicConfiguration : IEntityTypeConfiguration<Ped
         b.Property(x => x.Category).HasMaxLength(80).IsRequired();
         b.Property(x => x.Reference).HasMaxLength(500);
         b.Property(x => x.ExternalKey).HasMaxLength(120);
+        b.Property(x => x.Objective).HasMaxLength(2000);
+        b.Property(x => x.Example).HasMaxLength(4000);
+        b.Property(x => x.Correction).HasMaxLength(8000);
         b.HasIndex(x => new { x.ReferentialVersionId, x.Code }).IsUnique();
         b.HasIndex(x => new { x.ReferentialVersionId, x.Number });
         b.Ignore(x => x.DomainEvents);
@@ -68,9 +71,28 @@ public sealed class LearnerTopicProgressConfiguration : IEntityTypeConfiguration
         b.Property(x => x.TopicId).HasConversion(x => x.Value, x => new PedagogicalTopicId(x));
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
         b.Property(x => x.EvaluatorDisplayName).HasMaxLength(200);
+        b.Property(x => x.PositivePoints).HasMaxLength(2000);
+        b.Property(x => x.Improvements).HasMaxLength(2000);
         b.Property(x => x.Comment).HasMaxLength(2000);
+        b.Property(x => x.NextObjective).HasMaxLength(2000);
         b.HasIndex(x => new { x.EnrollmentId, x.TopicId }).IsUnique();
+        b.HasMany(x => x.EvaluationCriteria).WithOne().HasForeignKey(x => x.LearnerTopicProgressId).OnDelete(DeleteBehavior.Cascade);
+        b.Navigation(x => x.EvaluationCriteria).UsePropertyAccessMode(PropertyAccessMode.Field);
         b.Ignore(x => x.DomainEvents);
+    }
+}
+
+public sealed class LearnerTopicEvaluationCriterionConfiguration : IEntityTypeConfiguration<LearnerTopicEvaluationCriterion>
+{
+    public void Configure(EntityTypeBuilder<LearnerTopicEvaluationCriterion> b)
+    {
+        b.ToTable("learner_topic_evaluation_criteria", SchemaNames.Learning);
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).HasConversion(x => x.Value, x => new LearnerTopicEvaluationCriterionId(x)).ValueGeneratedNever();
+        b.Property(x => x.LearnerTopicProgressId).HasConversion(x => x.Value, x => new LearnerTopicProgressId(x));
+        b.Property(x => x.Code).HasMaxLength(80).IsRequired();
+        b.Property(x => x.Level).HasConversion<string>().HasMaxLength(40);
+        b.HasIndex(x => new { x.LearnerTopicProgressId, x.Code }).IsUnique();
     }
 }
 

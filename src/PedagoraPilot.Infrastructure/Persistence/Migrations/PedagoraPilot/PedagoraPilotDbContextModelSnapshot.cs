@@ -1375,6 +1375,32 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.ToTable("learner_profiles", "learning");
                 });
 
+            modelBuilder.Entity("PedagoraPilot.Domain.Learning.LearnerTopicEvaluationCriterion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid>("LearnerTopicProgressId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LearnerTopicProgressId", "Code")
+                        .IsUnique();
+
+                    b.ToTable("learner_topic_evaluation_criteria", "learning");
+                });
+
             modelBuilder.Entity("PedagoraPilot.Domain.Learning.LearnerTopicProgress", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1394,8 +1420,20 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("Improvements")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("NextObjective")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("PositivePoints")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<DateOnly?>("PreparationDate")
                         .HasColumnType("date");
@@ -1446,11 +1484,19 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
+                    b.Property<string>("Correction")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Example")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
 
                     b.Property<string>("ExternalKey")
                         .HasMaxLength(120)
@@ -1458,6 +1504,10 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
 
                     b.Property<int?>("Number")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Objective")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<string>("Reference")
                         .HasMaxLength(500)
@@ -1545,6 +1595,33 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AbsenceAlerts")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("AcademicYear")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<bool>("AllowSiteOverrides")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("AutoArchive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("CertificationAlerts")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
                     b.Property<string>("CountryCode")
                         .IsRequired()
                         .HasMaxLength(2)
@@ -1556,6 +1633,21 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("DateFormat")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("EnabledModulesCsv")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<DateTimeOffset?>("LastModifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1566,6 +1658,21 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<string>("LoginTagline")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<string>("LogoLabel")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ManagerName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
 
                     b.Property<string>("OwnerEmail")
                         .IsRequired()
@@ -1579,10 +1686,63 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.Property<Guid>("OwnerUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("PostalCode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("PrimaryColor")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<bool>("RemoteWorkApprovalRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("RemoteWorkEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("RemoteWorkEndOfDayReport")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("RemoteWorkHalfDayAllowed")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("RemoteWorkMaxDaysPerWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SecondaryColor")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("ShortName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Siret")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<bool>("StrictAudit")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Timezone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TrainingDeclarationNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -1590,6 +1750,17 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint");
+
+                    b.Property<string>("Website")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<bool>("WeeklyDigest")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("WhiteLabel")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
 
@@ -1605,6 +1776,11 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
                     b.Property<string>("City")
                         .IsRequired()
                         .HasMaxLength(120)
@@ -1613,9 +1789,19 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
                     b.Property<string>("ExternalKey")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Manager")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1624,6 +1810,16 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("PostalCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -2566,6 +2762,15 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("PedagoraPilot.Domain.Learning.LearnerTopicEvaluationCriterion", b =>
+                {
+                    b.HasOne("PedagoraPilot.Domain.Learning.LearnerTopicProgress", null)
+                        .WithMany("EvaluationCriteria")
+                        .HasForeignKey("LearnerTopicProgressId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("PedagoraPilot.Domain.Organizations.Organization", b =>
                 {
                     b.OwnsOne("PedagoraPilot.Domain.Organizations.ValueObjects.OrganizationCode", "Code", b1 =>
@@ -2702,6 +2907,11 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
             modelBuilder.Entity("PedagoraPilot.Domain.Learning.DrivingEvaluation", b =>
                 {
                     b.Navigation("Criteria");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Learning.LearnerTopicProgress", b =>
+                {
+                    b.Navigation("EvaluationCriteria");
                 });
 
             modelBuilder.Entity("PedagoraPilot.Domain.Training.Delivery.AttendanceSheet", b =>

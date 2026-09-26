@@ -28,12 +28,16 @@ public sealed class GetCertificationSchemesQueryHandler(ICertificationSchemeRepo
         var organizationId = TenantScope.Organization(current);
         if (organizationId.HasValue)
         {
-            var allowedVersionIds = await (from version in versions.Query(false)
-                                           join referential in referentials.Query(false) on version.ReferentialId equals referential.Id
-                                           join offering in offerings.Query(false) on referential.ProgramId equals offering.ProgramId
-                                           join site in sites.Query(false) on offering.SiteId equals site.Id
-                                           where offering.IsActive && site.OrganizationId == organizationId.Value
-                                           select version.Id).Distinct().ToArrayAsync(ct);
+            var candidates = await (from version in versions.Query(false)
+                                    join referential in referentials.Query(false) on version.ReferentialId equals referential.Id
+                                    join offering in offerings.Query(false) on referential.ProgramId equals offering.ProgramId
+                                    join site in sites.Query(false) on offering.SiteId equals site.Id
+                                    where offering.IsActive && site.OrganizationId == organizationId.Value
+                                    select new { VersionId = version.Id, SiteId = site.Id, ProgramId = offering.ProgramId })
+                .Distinct().ToListAsync(ct);
+            var allowedVersionIds = candidates
+                .Where(x => current.CanViewProgram(x.SiteId, x.ProgramId))
+                .Select(x => x.VersionId).Distinct().ToArray();
             q = q.Where(x => allowedVersionIds.Contains(x.ReferentialVersionId));
         }
         if (r.ReferentialVersionId.HasValue)
@@ -43,7 +47,7 @@ public sealed class GetCertificationSchemesQueryHandler(ICertificationSchemeRepo
     }
 }
 
-public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamSessionRepository repo, ICurrentUser current) : IRequestHandler<GetCertificationExamSessionsQuery, IReadOnlyCollection<CertificationExamSessionDto>>
+public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamSessionRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<GetCertificationExamSessionsQuery, IReadOnlyCollection<CertificationExamSessionDto>>
 {
     public async Task<IReadOnlyCollection<CertificationExamSessionDto>> Handle(GetCertificationExamSessionsQuery r, CancellationToken ct)
     {
@@ -53,23 +57,63 @@ public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamS
             q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
-        return (await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct)).Select(CertMap.Session).ToArray();
+        var rows = await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct);
+        rows = await CertificationContextualAccess.FilterSessionsAsync(rows, cohorts, offerings, current, ct);
+        return rows.Select(CertMap.Session).ToArray();
     }
 }
 
-public sealed class GetCertificationCandidatesQueryHandler(ICertificationCandidateRepository repo, ICurrentUser current) : IRequestHandler<GetCertificationCandidatesQuery, IReadOnlyCollection<CertificationCandidateDto>>
+public sealed class GetCertificationCandidatesQueryHandler(
+    ICertificationCandidateRepository repo,
+    ICertificationExamSessionRepository sessions,
+    ICohortRepository cohorts,
+    IProgramOfferingRepository offerings,
+    IEnrollmentRepository enrollments,
+    ILearnerProfileRepository learnerProfiles,
+    IPersonRepository people,
+    ICurrentUser current) : IRequestHandler<GetCertificationCandidatesQuery, IReadOnlyCollection<CertificationCandidateDto>>
 {
     public async Task<IReadOnlyCollection<CertificationCandidateDto>> Handle(GetCertificationCandidatesQuery r, CancellationToken ct)
     {
+        var session = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        TenantScope.Ensure(current, session.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: false, ct);
         var q = repo.Query(false).Include(x => x.Assessments).Where(x => x.ExamSessionId == r.SessionId).AsQueryable();
         var organizationId = TenantScope.Organization(current);
         if (organizationId.HasValue)
             q = q.Where(x => x.OrganizationId == organizationId.Value);
-        return (await q.ToListAsync(ct)).Select(CertMap.Candidate).ToArray();
+
+        var rows = await q.ToListAsync(ct);
+        if (rows.Count == 0)
+            return Array.Empty<CertificationCandidateDto>();
+
+        var enrollmentIds = rows.Select(x => x.EnrollmentId).Distinct().ToArray();
+        var identities = await (from enrollment in enrollments.Query(false)
+                                join profile in learnerProfiles.Query(false) on enrollment.LearnerProfileId equals profile.Id
+                                join person in people.Query(false) on profile.PersonId equals person.Id
+                                where enrollmentIds.Contains(enrollment.Id)
+                                select new
+                                {
+                                    enrollment.Id,
+                                    person.FirstName,
+                                    person.LastName
+                                })
+            .ToDictionaryAsync(x => x.Id, ct);
+
+        return rows.Select(candidate =>
+        {
+            identities.TryGetValue(candidate.EnrollmentId, out var identity);
+            return CertMap.Candidate(candidate) with
+            {
+                FirstName = identity?.FirstName ?? string.Empty,
+                LastName = identity?.LastName ?? string.Empty,
+                CandidateNumber = string.Empty
+            };
+        }).ToArray();
     }
 }
 
-public sealed class CreateCertificationExamSessionCommandHandler(ICohortRepository cohorts, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICurrentUser current) : IRequestHandler<CreateCertificationExamSessionCommand, CertificationExamSessionDto>
+public sealed class CreateCertificationExamSessionCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICurrentUser current) : IRequestHandler<CreateCertificationExamSessionCommand, CertificationExamSessionDto>
 {
     public async Task<CertificationExamSessionDto> Handle(CreateCertificationExamSessionCommand r, CancellationToken ct)
     {
@@ -80,29 +124,32 @@ public sealed class CreateCertificationExamSessionCommandHandler(ICohortReposito
         if (s.ReferentialVersionId != c.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.CertificationSchemeReferentialMismatch);
         TenantScope.Ensure(current, c.OrganizationId);
+        await ContextualScope.EnsureCanManageCohortAsync(current, c, offerings, ct);
         var x = CertificationExamSession.Create(c.OrganizationId, c.SiteId, c.Id, s.Id, r.Title, r.StartsAtUtc, r.EndsAtUtc, r.Venue);
         await sessions.AddAsync(x, ct);
         return CertMap.Session(x);
     }
 }
 
-public sealed class PlanCertificationExamSessionCommandHandler(ICertificationExamSessionRepository sessions, ICurrentUser current) : IRequestHandler<PlanCertificationExamSessionCommand, CertificationExamSessionDto>
+public sealed class PlanCertificationExamSessionCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<PlanCertificationExamSessionCommand, CertificationExamSessionDto>
 {
     public async Task<CertificationExamSessionDto> Handle(PlanCertificationExamSessionCommand r, CancellationToken ct)
     {
         var x = await sessions.GetByIdAsync(r.SessionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(x, cohorts, offerings, current, manage: true, ct);
         x.Plan();
         return CertMap.Session(x);
     }
 }
 
-public sealed class RegisterCohortCandidatesCommandHandler(ICertificationExamSessionRepository sessions, IEnrollmentRepository enrollments, ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<RegisterCohortCandidatesCommand, int>
+public sealed class RegisterCohortCandidatesCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<RegisterCohortCandidatesCommand, int>
 {
     public async Task<int> Handle(RegisterCohortCandidatesCommand r, CancellationToken ct)
     {
         var s = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, s.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(s, cohorts, offerings, current, manage: true, ct);
         var rows = await enrollments.Query(false).Where(x => x.CohortId == s.CohortId).ToListAsync(ct);
         var count = 0;
         foreach (var e in rows)
@@ -117,24 +164,27 @@ public sealed class RegisterCohortCandidatesCommandHandler(ICertificationExamSes
     }
 }
 
-public sealed class EvaluateCertificationEligibilityCommandHandler(ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<EvaluateCertificationEligibilityCommand, CertificationCandidateDto>
+public sealed class EvaluateCertificationEligibilityCommandHandler(ICertificationCandidateRepository candidates, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<EvaluateCertificationEligibilityCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(EvaluateCertificationEligibilityCommand r, CancellationToken ct)
     {
         var x = await candidates.Query(true).Include(a => a.Assessments).SingleOrDefaultAsync(a => a.Id == r.CandidateId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationCandidateNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        var examSession = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        await CertificationContextualAccess.EnsureSessionAsync(examSession, cohorts, offerings, current, manage: true, ct);
         x.SetEligibility(r.Eligible, JsonSerializer.Serialize(new { eligible = r.Eligible, blockers = r.Blockers ?? [] }));
         return CertMap.Candidate(x);
     }
 }
 
-public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCandidateRepository candidates, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentCommand, CertificationCandidateDto>
+public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCandidateRepository candidates, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(RecordCertificationAssessmentCommand r, CancellationToken ct)
     {
         var x = await candidates.Query(true).Include(a => a.Assessments).SingleOrDefaultAsync(a => a.Id == r.CandidateId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationCandidateNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
         var session = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
         var scheme = await schemes.Query(false).Include(a => a.Steps).SingleOrDefaultAsync(a => a.Id == session.SchemeId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSchemeNotFound);
         if (scheme.Steps.All(a => a.Id != r.StepDefinitionId))
             throw new ValidationApplicationException(ErrorKeys.CertificationStepNotFound);
@@ -145,12 +195,14 @@ public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCa
     }
 }
 
-public sealed class RecordCertificationDecisionCommandHandler(ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<RecordCertificationDecisionCommand, CertificationCandidateDto>
+public sealed class RecordCertificationDecisionCommandHandler(ICertificationCandidateRepository candidates, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<RecordCertificationDecisionCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(RecordCertificationDecisionCommand r, CancellationToken ct)
     {
         var x = await candidates.Query(true).Include(a => a.Assessments).SingleOrDefaultAsync(a => a.Id == r.CandidateId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationCandidateNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        var examSession = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        await CertificationContextualAccess.EnsureSessionAsync(examSession, cohorts, offerings, current, manage: true, ct);
         if (!Enum.TryParse<CertificationDecision>(r.Decision, true, out var d))
             throw new ValidationApplicationException(ErrorKeys.CertificationDecisionInvalid);
         x.Decide(d, r.Comment);
@@ -158,12 +210,13 @@ public sealed class RecordCertificationDecisionCommandHandler(ICertificationCand
     }
 }
 
-public sealed class PublishCertificationResultsCommandHandler(ICertificationExamSessionRepository sessions, ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<PublishCertificationResultsCommand, CertificationExamSessionDto>
+public sealed class PublishCertificationResultsCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<PublishCertificationResultsCommand, CertificationExamSessionDto>
 {
     public async Task<CertificationExamSessionDto> Handle(PublishCertificationResultsCommand r, CancellationToken ct)
     {
         var s = await sessions.GetByIdAsync(r.SessionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, s.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(s, cohorts, offerings, current, manage: true, ct);
         var rows = await candidates.Query(true).Where(x => x.ExamSessionId == s.Id).ToListAsync(ct);
         if (rows.Count == 0 || rows.Any(x => x.Status != CertificationCandidateStatus.Completed))
             throw new ConflictApplicationException(ErrorKeys.CertificationCandidatesNotCompleted);
@@ -176,12 +229,13 @@ public sealed class PublishCertificationResultsCommandHandler(ICertificationExam
     }
 }
 
-public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository sessions, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<AssignJuryCommand, JuryAssignmentDto>
+public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<AssignJuryCommand, JuryAssignmentDto>
 {
     public async Task<JuryAssignmentDto> Handle(AssignJuryCommand r, CancellationToken ct)
     {
         var s = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, s.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(s, cohorts, offerings, current, manage: true, ct);
         var j = JuryAssignment.Create(s.OrganizationId, s.Id, r.AuthGateUserId, r.DisplayName, r.Role);
         await juries.AddAsync(j, ct);
         return CertMap.Jury(j);

@@ -3,5 +3,6 @@ public enum TrainingSiteStatus
 {
     Active = 1,
     Inactive = 2,
-    Archived = 3
+    Archived = 3,
+    Attention = 4
 }

@@ -8,6 +8,7 @@ using PedagoraPilot.Application.Mapping;
 using PedagoraPilot.Contracts.Workforce;
 using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Workforce;
+using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Application.Workforce;
 internal static class WfMap
@@ -29,13 +30,24 @@ public sealed class GetRemoteWorkRequestsQueryHandler(IRemoteWorkRequestReposito
     {
         var q = repo.Query(false).Include(x => x.Activities).AsQueryable();
         var organizationId = TenantScope.Organization(current);
+        if (!current.UserId.HasValue)
+            throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
+        // A client-supplied mineOnly=false must never expose coworkers to a View-only user.
+        if (!organizationId.HasValue && !r.SiteId.HasValue)
+            throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         if (organizationId.HasValue)
             q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.SiteId.HasValue)
+        {
+            ContextualScope.EnsureCanViewSite(current, r.SiteId.Value);
             q = q.Where(x => x.SiteId == r.SiteId.Value);
-        if (r.MineOnly && current.UserId.HasValue)
+        }
+        if (r.MineOnly || !current.HasPermission(PedagoraPilotPermissionCodes.RemoteWork.Manage))
             q = q.Where(x => x.AuthGateUserId == current.UserId.Value);
-        return (await q.OrderByDescending(x => x.Date).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(ct)).Select(x => WfMap.Request(x, mapper)).ToArray();
+        var rows = await q.OrderByDescending(x => x.Date).ThenByDescending(x => x.CreatedAtUtc).ToListAsync(ct);
+        if (current.HasContextualScopeRestrictions)
+            rows = rows.Where(x => current.CanViewSite(x.SiteId)).ToList();
+        return rows.Select(x => WfMap.Request(x, mapper)).ToArray();
     }
 }
 
@@ -47,6 +59,7 @@ public sealed class CreateRemoteWorkCommandHandler(IRemoteWorkRequestRepository 
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         if (!await sites.Query(false).AnyAsync(x => x.Id == r.SiteId && x.OrganizationId == current.OrganizationId.Value, ct))
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
+        ContextualScope.EnsureCanViewSite(current, r.SiteId);
         if (!Enum.TryParse<RemoteWorkPeriod>(Normalize(r.Period), true, out var period))
             throw new ValidationApplicationException(ErrorKeys.RemoteWorkPeriodInvalid);
         if (await repo.HasOverlappingRequestAsync(current.UserId.Value, r.Date, null, ct))
@@ -66,6 +79,7 @@ public sealed class DecideRemoteWorkCommandHandler(IRemoteWorkRequestRepository 
     {
         var x = await repo.Query(true).Include(a => a.Activities).SingleOrDefaultAsync(a => a.Id == r.RequestId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.RemoteWorkNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        ContextualScope.EnsureCanManageSite(current, x.SiteId);
         if (!current.UserId.HasValue)
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         var name = current.DisplayName ?? current.Email ?? "Pedagora Pilot";
@@ -83,11 +97,30 @@ public sealed class UpdateRemoteWorkActivityCommandHandler(IRemoteWorkRequestRep
     {
         var x = await repo.Query(true).Include(a => a.Activities).SingleOrDefaultAsync(a => a.Id == r.RequestId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.RemoteWorkNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
+        ContextualScope.EnsureCanViewSite(current, x.SiteId);
         if (!current.UserId.HasValue || x.AuthGateUserId != current.UserId.Value)
             throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
         if (!Enum.TryParse<RemoteWorkActivityStatus>(r.Status, true, out var status))
             throw new ValidationApplicationException(ErrorKeys.RemoteWorkActivityStatusInvalid);
         x.SetActivity(r.ActivityId, status);
         return WfMap.Request(x, mapper);
+    }
+}
+
+public sealed class GetRemoteWorkPolicyQueryHandler(IOrganizationRepository organizations, ICurrentUser current)
+    : IRequestHandler<GetRemoteWorkPolicyQuery, RemoteWorkPolicyDto>
+{
+    public async Task<RemoteWorkPolicyDto> Handle(GetRemoteWorkPolicyQuery _, CancellationToken ct)
+    {
+        var organizationId = TenantScope.Organization(current)
+            ?? throw new ForbiddenApplicationException(ErrorKeys.RemoteWorkForbidden);
+        var organization = await organizations.GetByIdAsync(organizationId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
+        return new RemoteWorkPolicyDto(
+            organization.RemoteWorkEnabled,
+            organization.RemoteWorkApprovalRequired,
+            Math.Max(0, organization.RemoteWorkMaxDaysPerWeek),
+            organization.RemoteWorkHalfDayAllowed,
+            organization.RemoteWorkEndOfDayReport);
     }
 }

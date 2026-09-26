@@ -65,8 +65,15 @@ public sealed class CertificationCandidate : AggregateRoot<CertificationCandidat
             throw new DomainException("CERTIFICATION_CANDIDATE_NOT_ELIGIBLE");
         if (Status == CertificationCandidateStatus.Published)
             throw new DomainException("CERTIFICATION_CANDIDATE_LOCKED");
-        if (_assessments.Any(x => x.StepDefinitionId == stepId))
-            throw new DomainException("CERTIFICATION_ASSESSMENT_ALREADY_EXISTS");
+        var existing = _assessments.SingleOrDefault(x => x.StepDefinitionId == stepId);
+        if (existing is not null)
+        {
+            existing.Update(juryDisplayName, outcome, score, comment);
+            Status = CertificationCandidateStatus.InProgress;
+            UpdatedAtUtc = DateTime.UtcNow;
+            RaiseDomainEvent(new CertificationAssessmentRecordedDomainEvent(Id, OrganizationId, existing.Id, stepId));
+            return existing;
+        }
         var a = new CertificationAssessment(CertificationAssessmentId.New(), Id, stepId, juryDisplayName, outcome, score, comment);
         _assessments.Add(a);
         Status = CertificationCandidateStatus.InProgress;
@@ -128,4 +135,17 @@ public sealed class CertificationAssessment
     public decimal? Score { get; private set; }
     public string? Comment { get; private set; }
     public DateTimeOffset RecordedAtUtc { get; private set; }
+
+    internal void Update(string juryDisplayName, CertificationAssessmentOutcome outcome, decimal? score, string? comment)
+    {
+        if (string.IsNullOrWhiteSpace(juryDisplayName))
+            throw new DomainException("CERTIFICATION_JURY_REQUIRED");
+        if (score.HasValue && (score < 0 || score > 100))
+            throw new DomainException("CERTIFICATION_SCORE_INVALID");
+        JuryDisplayName = juryDisplayName.Trim();
+        Outcome = outcome;
+        Score = score;
+        Comment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+        RecordedAtUtc = DateTimeOffset.UtcNow;
+    }
 }

@@ -78,12 +78,13 @@ internal static class TrainingDeliveryMapper
         _ => throw new ValidationApplicationException(ErrorKeys.AttendanceStatusInvalid)};
 }
 
-public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohorts, IEnrollmentRepository enrollments, ITrainingSessionRepository sessions, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<CreateTrainingSessionCommand, TrainingSessionDto>
+public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ITrainingSessionRepository sessions, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<CreateTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CreateTrainingSessionCommand request, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(request.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         EnsureOrganizationScope(cohort.OrganizationId, currentUser);
+        await ContextualScope.EnsureCanManageCohortAsync(currentUser, cohort, offerings, ct);
         if (cohort.Status is CohortStatus.Completed or CohortStatus.Cancelled)
             throw new ConflictApplicationException(ErrorKeys.CohortClosed);
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
@@ -129,12 +130,13 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
     }
 }
 
-public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<UpdateTrainingSessionCommand, TrainingSessionDto>
+public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<UpdateTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(UpdateTrainingSessionCommand request, CancellationToken ct)
     {
         var entity = await sessions.GetByIdAsync(request.Id, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
+        await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
@@ -146,12 +148,13 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
     }
 }
 
-public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<CancelTrainingSessionCommand, TrainingSessionDto>
+public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<CancelTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CancelTrainingSessionCommand request, CancellationToken ct)
     {
         var entity = await sessions.GetByIdAsync(request.Id, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
+        await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
         entity.Cancel();
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
@@ -159,12 +162,13 @@ public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionReposito
     }
 }
 
-public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<CompleteTrainingSessionCommand, TrainingSessionDto>
+public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<CompleteTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CompleteTrainingSessionCommand request, CancellationToken ct)
     {
         var entity = await sessions.GetByIdAsync(request.Id, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
+        await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
         entity.Complete();
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
@@ -172,7 +176,7 @@ public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionReposi
     }
 }
 
-public sealed class GetTrainingSessionsQueryHandler(ITrainingSessionRepository sessions, IAttendanceSheetRepository attendance, IEnrollmentRepository enrollments, ILearnerProfileRepository profiles, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<GetTrainingSessionsQuery, IReadOnlyCollection<TrainingSessionDto>>
+public sealed class GetTrainingSessionsQueryHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IAttendanceSheetRepository attendance, IEnrollmentRepository enrollments, ILearnerProfileRepository profiles, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<GetTrainingSessionsQuery, IReadOnlyCollection<TrainingSessionDto>>
 {
     public async Task<IReadOnlyCollection<TrainingSessionDto>> Handle(GetTrainingSessionsQuery request, CancellationToken ct)
     {
@@ -208,6 +212,7 @@ public sealed class GetTrainingSessionsQueryHandler(ITrainingSessionRepository s
         }
 
         var entities = await query.OrderBy(x => x.StartsAtUtc).ToListAsync(ct);
+        entities = await TrainingSessionContextualAccess.FilterAsync(entities, cohorts, offerings, currentUser, ct);
         if (LearnerSelfAccess.Applies(currentUser))
             entities = entities.Where(x => own.Any(e => StudentSessionAccess.IsParticipant(x, e))).ToList();
         if (entities.Count == 0)
@@ -235,12 +240,13 @@ public sealed class GetTrainingSessionsQueryHandler(ITrainingSessionRepository s
     }
 }
 
-public sealed class GetTrainingSessionQueryHandler(ITrainingSessionRepository sessions, IAttendanceSheetRepository attendance, IEnrollmentRepository enrollments, ILearnerProfileRepository profiles, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<GetTrainingSessionQuery, TrainingSessionDto>
+public sealed class GetTrainingSessionQueryHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IAttendanceSheetRepository attendance, IEnrollmentRepository enrollments, ILearnerProfileRepository profiles, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<GetTrainingSessionQuery, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(GetTrainingSessionQuery request, CancellationToken ct)
     {
         var entity = await sessions.GetByIdAsync(request.Id, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
+        await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: false, ct);
         EnrollmentId? self = null;
         if (LearnerSelfAccess.Applies(currentUser))
             self = StudentSessionAccess.EnsureParticipant(entity,
@@ -258,12 +264,13 @@ public sealed class GetTrainingSessionQueryHandler(ITrainingSessionRepository se
     }
 }
 
-public sealed class GetAttendanceSheetQueryHandler(ITrainingSessionRepository sessions, IAttendanceSheetRepository sheets, IEnrollmentRepository enrollments, ILearnerProfileRepository learners, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<GetAttendanceSheetQuery, AttendanceSheetDto>
+public sealed class GetAttendanceSheetQueryHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IAttendanceSheetRepository sheets, IEnrollmentRepository enrollments, ILearnerProfileRepository learners, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<GetAttendanceSheetQuery, AttendanceSheetDto>
 {
     public async Task<AttendanceSheetDto> Handle(GetAttendanceSheetQuery request, CancellationToken ct)
     {
         var session = await sessions.GetByIdAsync(request.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(session.OrganizationId, currentUser);
+        await TrainingSessionContextualAccess.EnsureAsync(session, cohorts, offerings, currentUser, manage: false, ct);
         EnrollmentId? self = null;
         if (LearnerSelfAccess.Applies(currentUser))
             self = StudentSessionAccess.EnsureParticipant(session,
@@ -318,12 +325,13 @@ public sealed class GetAttendanceSheetQueryHandler(ITrainingSessionRepository se
     }
 }
 
-public sealed class SaveAttendanceCommandHandler(ITrainingSessionRepository sessions, IAttendanceSheetRepository sheets, IEnrollmentRepository enrollments, ILearnerProfileRepository learners, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<SaveAttendanceCommand, AttendanceSheetDto>
+public sealed class SaveAttendanceCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IAttendanceSheetRepository sheets, IEnrollmentRepository enrollments, ILearnerProfileRepository learners, IPersonRepository people, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<SaveAttendanceCommand, AttendanceSheetDto>
 {
     public async Task<AttendanceSheetDto> Handle(SaveAttendanceCommand request, CancellationToken ct)
     {
         var session = await sessions.GetByIdAsync(request.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(session.OrganizationId, currentUser);
+        await TrainingSessionContextualAccess.EnsureAsync(session, cohorts, offerings, currentUser, manage: true, ct);
         if (session.Status == TrainingSessionStatus.Cancelled)
             throw new ConflictApplicationException(ErrorKeys.SessionCancelled);
         var sheet = await sheets.GetBySessionIdAsync(session.Id, true, ct);

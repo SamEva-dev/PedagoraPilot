@@ -1,13 +1,14 @@
 using DomainRelay.Abstractions;
+using PedagoraPilot.Application.Abstractions.Messaging;
 using FluentValidation;
 using PedagoraPilot.Contracts.Documents;
 using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Application.Documents;
-public sealed record UploadDocumentCommand(string Title, string? Description, string Category, string Visibility, string OwnerType, Guid? OwnerId, Guid? SiteId, Guid? ProgramId, Guid? CohortId, string AuthorDisplayName, string FileName, string ContentType, long SizeBytes, Stream Content) : IRequest<DocumentDto>;
-public sealed record ReplaceDocumentVersionCommand(DocumentId DocumentId, string AuthorDisplayName, string FileName, string ContentType, long SizeBytes, Stream Content) : IRequest<DocumentDto>;
-public sealed record UpdateDocumentMetadataCommand(DocumentId DocumentId, string Title, string? Description, string Category, string Visibility) : IRequest<DocumentDto>;
-public sealed record DeleteDocumentCommand(DocumentId DocumentId) : IRequest<bool>;
+public sealed record UploadDocumentCommand(string Title, string? Description, string Category, string Visibility, string OwnerType, Guid? OwnerId, Guid? SiteId, Guid? ProgramId, Guid? CohortId, string AuthorDisplayName, string FileName, string ContentType, long SizeBytes, Stream Content) : ICommand<DocumentDto>;
+public sealed record ReplaceDocumentVersionCommand(DocumentId DocumentId, string AuthorDisplayName, string FileName, string ContentType, long SizeBytes, Stream Content) : ICommand<DocumentDto>;
+public sealed record UpdateDocumentMetadataCommand(DocumentId DocumentId, string Title, string? Description, string Category, string Visibility) : ICommand<DocumentDto>;
+public sealed record DeleteDocumentCommand(DocumentId DocumentId) : ICommand<bool>;
 public sealed class UploadDocumentCommandValidator : AbstractValidator<UploadDocumentCommand>
 {
     public UploadDocumentCommandValidator()

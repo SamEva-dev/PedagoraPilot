@@ -21,6 +21,22 @@ public sealed class ReportingController(IMediator mediator) : ControllerBase
     [HttpGet("cohorts/{cohortId:guid}/dashboard")]
     [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
     public async Task<ActionResult<CohortDashboardDto>> CohortDashboard(Guid cohortId, CancellationToken ct) => Ok(await mediator.Send(new GetCohortDashboardQuery(cohortId), ct));
+    [HttpGet("cohorts/{cohortId:guid}/learners")]
+    [HasPermission(PedagoraPilotPermissionCodes.Learners.View)]
+    public async Task<ActionResult<IReadOnlyCollection<CohortLearnerDashboardDto>>> CohortLearners(Guid cohortId, CancellationToken ct) => Ok(await mediator.Send(new GetCohortLearnerDashboardsQuery(cohortId), ct));
+    [HttpGet("cohorts/{cohortId:guid}/driving-observations")]
+    [HasPermission(PedagoraPilotPermissionCodes.Learners.View)]
+    public async Task<ActionResult<IReadOnlyCollection<CohortDrivingObservationDto>>> CohortDrivingObservations(Guid cohortId, [FromQuery] int take = 20, CancellationToken ct = default) => Ok(await mediator.Send(new GetCohortDrivingObservationsQuery(cohortId, take), ct));
+    [HttpGet("learners/me/dashboard")]
+    public async Task<ActionResult<CohortLearnerDashboardDto>> MyLearnerDashboard([FromQuery] Guid? cohortId, CancellationToken ct) => Ok(await mediator.Send(new GetMyLearnerDashboardQuery(cohortId), ct));
+    [HttpGet("learners/{learnerProfileId:guid}/detail")]
+    [HasPermission(PedagoraPilotPermissionCodes.Learners.DetailView)]
+    public async Task<ActionResult<LearnerDetailReportDto>> LearnerDetail(Guid learnerProfileId, [FromQuery] Guid? cohortId, CancellationToken ct) => Ok(await mediator.Send(new GetLearnerDetailQuery(learnerProfileId, cohortId), ct));
+    [HttpGet("learners/me/detail")]
+    public async Task<ActionResult<LearnerDetailReportDto>> MyLearnerDetail([FromQuery] Guid? cohortId, CancellationToken ct) => Ok(await mediator.Send(new GetMyLearnerDetailQuery(cohortId), ct));
+    [HttpGet("organizations/{organizationId:guid}/certification-success")]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.View)]
+    public async Task<ActionResult<IReadOnlyCollection<CertificationSuccessRecordDto>>> CertificationSuccess(Guid organizationId, CancellationToken ct) => Ok(await mediator.Send(new GetCertificationSuccessQuery(organizationId), ct));
     [HttpGet("cohorts/{cohortId:guid}/attendance-trend")]
     [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
     public async Task<ActionResult<IReadOnlyCollection<ReportingTrendPointDto>>> AttendanceTrend(Guid cohortId, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct) => Ok(await mediator.Send(new GetAttendanceTrendQuery(cohortId, from, to), ct));

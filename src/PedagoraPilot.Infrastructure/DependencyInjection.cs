@@ -49,6 +49,7 @@ public static class DependencyInjection
             builder.WithTypeRegistry(registry =>
             {
                 registry.Register<OrganizationProvisionedDomainEvent>("pedagora.organization.provisioned.v1");
+                registry.Register<OrganizationAdministrationUpdatedDomainEvent>("pedagora.organization.administration.updated.v1");
                 registry.Register<TrainingSiteCreatedDomainEvent>("pedagora.organization.training-site.created.v1");
                 registry.Register<TrainingSiteUpdatedDomainEvent>("pedagora.organization.training-site.updated.v1");
                 registry.Register<TrainingProgramCreatedDomainEvent>("pedagora.catalog.program.created.v1");

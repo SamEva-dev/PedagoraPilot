@@ -26,12 +26,24 @@ public sealed class LearningProgressController(IMediator mediator) : ControllerB
     [HttpGet("referentials/{referentialVersionId:guid}/topics")]
     [HasPermission(PedagoraPilotPermissionCodes.Sheets.View)]
     public Task<IReadOnlyCollection<PedagogicalTopicDto>> GetTopics(Guid referentialVersionId, CancellationToken ct) => mediator.Send(new GetPedagogicalTopicsQuery(referentialVersionId), ct);
+    [HttpGet("referentials/{referentialVersionId:guid}/topics/catalog")]
+    [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
+    public Task<IReadOnlyCollection<PedagogicalTopicDto>> GetTopicCatalog(Guid referentialVersionId, CancellationToken ct) => mediator.Send(new GetPedagogicalTopicCatalogQuery(referentialVersionId), ct);
+    [HttpPost("referentials/{referentialVersionId:guid}/topics")]
+    [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
+    public Task<PedagogicalTopicDto> CreateTopic(Guid referentialVersionId, [FromBody] SavePedagogicalTopicRequest request, CancellationToken ct) => mediator.Send(new CreatePedagogicalTopicCommand(referentialVersionId, request.Number, request.Title, request.Category, request.DurationMinutes, request.Reference, request.Active, request.Objective, request.Example, request.Correction), ct);
+    [HttpPut("referentials/{referentialVersionId:guid}/topics/{topicId:guid}")]
+    [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
+    public Task<PedagogicalTopicDto> UpdateTopicCatalog(Guid referentialVersionId, Guid topicId, [FromBody] SavePedagogicalTopicRequest request, CancellationToken ct) => mediator.Send(new UpdatePedagogicalTopicCommand(referentialVersionId, new PedagogicalTopicId(topicId), request.Number, request.Title, request.Category, request.DurationMinutes, request.Reference, request.Active, request.Objective, request.Example, request.Correction), ct);
+    [HttpDelete("referentials/{referentialVersionId:guid}/topics/{topicId:guid}")]
+    [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
+    public Task<bool> DeleteTopic(Guid referentialVersionId, Guid topicId, CancellationToken ct) => mediator.Send(new DeletePedagogicalTopicCommand(referentialVersionId, new PedagogicalTopicId(topicId)), ct);
     [HttpGet("enrollments/{enrollmentId:guid}/topics")]
     [HasPermission(PedagoraPilotPermissionCodes.Sheets.View)]
     public Task<IReadOnlyCollection<LearnerTopicProgressDto>> GetLearnerTopics(Guid enrollmentId, CancellationToken ct) => mediator.Send(new GetLearnerTopicsQuery(new EnrollmentId(enrollmentId)), ct);
     [HttpPut("enrollments/{enrollmentId:guid}/topics/{topicId:guid}")]
     [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
-    public Task<LearnerTopicProgressDto> UpdateTopic(Guid enrollmentId, Guid topicId, [FromBody] UpdateTopicProgressRequest request, CancellationToken ct) => mediator.Send(new UpdateTopicProgressCommand(new EnrollmentId(enrollmentId), new PedagogicalTopicId(topicId), request.Status, request.PreparationDate, request.PresentationDate, request.PresentationDurationMinutes, request.EvaluatorDisplayName, request.Comment), ct);
+    public Task<LearnerTopicProgressDto> UpdateTopic(Guid enrollmentId, Guid topicId, [FromBody] UpdateTopicProgressRequest request, CancellationToken ct) => mediator.Send(new UpdateTopicProgressCommand(new EnrollmentId(enrollmentId), new PedagogicalTopicId(topicId), request.Status, request.PreparationDate, request.PresentationDate, request.PresentationDurationMinutes, request.EvaluatorDisplayName, request.PositivePoints, request.Improvements, request.Comment, request.NextObjective, request.EvaluationCriteria), ct);
     [HttpGet("enrollments/{enrollmentId:guid}/driving-evaluations")]
     [HasPermission(PedagoraPilotPermissionCodes.Driving.View)]
     public Task<IReadOnlyCollection<DrivingEvaluationDto>> GetDriving(Guid enrollmentId, CancellationToken ct) => mediator.Send(new GetDrivingEvaluationsQuery(new EnrollmentId(enrollmentId)), ct);

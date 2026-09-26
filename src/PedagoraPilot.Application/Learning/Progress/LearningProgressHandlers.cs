@@ -29,13 +29,33 @@ internal static class LearningProgressDtoFactory
     public static PedagogicalTopicDto Topic(PedagogicalTopic x, IObjectMapper mapper)
     {
         var m = mapper.Map<PedagogicalTopic, PedagogicalTopicReadModel>(x);
-        return new(m.Id.Value, m.ReferentialVersionId, m.Code, m.Number, m.Title, m.Category, m.DurationMinutes, m.Reference, m.Active);
+        return new(m.Id.Value, m.ReferentialVersionId, m.Code, m.Number, m.Title, m.Category, m.DurationMinutes, m.Reference, m.Active, m.Objective, m.Example, m.Correction);
     }
 
     public static LearnerTopicProgressDto TopicProgress(LearnerTopicProgress p, PedagogicalTopic t, IObjectMapper mapper)
     {
         var m = mapper.Map<LearnerTopicProgress, LearnerTopicProgressReadModel>(p);
-        return new(m.Id.Value, m.EnrollmentId.Value, m.TopicId.Value, t.Code, t.Number, t.Title, t.Category, TopicStatusCode(m.Status), m.PreparationDate, m.PresentationDate, m.PresentationDurationMinutes, m.EvaluatorDisplayName, m.Comment);
+        return new(
+            m.Id.Value,
+            m.EnrollmentId.Value,
+            m.TopicId.Value,
+            t.Code,
+            t.Number,
+            t.Title,
+            t.Category,
+            TopicStatusCode(m.Status),
+            m.PreparationDate,
+            m.PresentationDate,
+            m.PresentationDurationMinutes,
+            m.EvaluatorDisplayName,
+            m.PositivePoints,
+            m.Improvements,
+            m.Comment,
+            m.NextObjective,
+            p.EvaluationCriteria
+                .OrderBy(x => x.Code)
+                .Select(x => new TopicEvaluationCriterionDto(x.Id.Value, x.Code, TopicEvaluationLevelCode(x.Level)))
+                .ToArray());
     }
 
     public static DrivingEvaluationDto Driving(DrivingEvaluation x, IObjectMapper mapper)
@@ -62,8 +82,16 @@ internal static class LearningProgressDtoFactory
         TopicProgressStatus.Rework => "rework",
         _ => "not_started"
     };
+    public static string TopicEvaluationLevelCode(TopicEvaluationLevel level) => level switch
+    {
+        TopicEvaluationLevel.Acquired => "acquired",
+        TopicEvaluationLevel.InProgress => "in_progress",
+        TopicEvaluationLevel.Review => "review",
+        _ => "in_progress"
+    };
     public static bool TryParseLevel(string value, out CompetencyLevel level) => Enum.TryParse((value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out level);
     public static bool TryParseTopicStatus(string value, out TopicProgressStatus status) => Enum.TryParse((value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out status);
+    public static bool TryParseTopicEvaluationLevel(string value, out TopicEvaluationLevel level) => Enum.TryParse((value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out level);
 }
 
 public sealed class GetCompetencyDefinitionsQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetCompetencyDefinitionsQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
@@ -75,7 +103,7 @@ public sealed class GetCompetencyDefinitionsQueryHandler(ICompetencyDefinitionRe
     }
 }
 
-public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerCompetenciesQuery, IReadOnlyCollection<LearnerCompetencyDto>>
+public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerCompetenciesQuery, IReadOnlyCollection<LearnerCompetencyDto>>
 {
     public async Task<IReadOnlyCollection<LearnerCompetencyDto>> Handle(GetLearnerCompetenciesQuery r, CancellationToken ct)
     {
@@ -83,6 +111,7 @@ public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enr
         TenantScope.Ensure(current, enrollment.OrganizationId);
         await LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        await ContextualScope.EnsureCanViewCohortAsync(current, cohort, offerings, ct);
         var defs = await definitions.Query(false).Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId && x.Active).OrderBy(x => x.SortOrder).ToListAsync(ct);
         var rows = await records.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).ToListAsync(ct);
         var byDefinition = rows.ToDictionary(x => x.CompetencyDefinitionId);
@@ -94,13 +123,14 @@ public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enr
     }
 }
 
-public sealed class EvaluateCompetencyCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<EvaluateCompetencyCommand, LearnerCompetencyDto>
+public sealed class EvaluateCompetencyCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<EvaluateCompetencyCommand, LearnerCompetencyDto>
 {
     public async Task<LearnerCompetencyDto> Handle(EvaluateCompetencyCommand r, CancellationToken ct)
     {
         var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        await ContextualScope.EnsureCanManageCohortAsync(current, cohort, offerings, ct);
         var definition = await definitions.GetByIdAsync(r.CompetencyDefinitionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
         if (definition.ReferentialVersionId != cohort.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
@@ -127,7 +157,65 @@ public sealed class GetPedagogicalTopicsQueryHandler(IPedagogicalTopicRepository
     }
 }
 
-public sealed class GetLearnerTopicsQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerTopicsQuery, IReadOnlyCollection<LearnerTopicProgressDto>>
+public sealed class GetPedagogicalTopicCatalogQueryHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetPedagogicalTopicCatalogQuery, IReadOnlyCollection<PedagogicalTopicDto>>
+{
+    public async Task<IReadOnlyCollection<PedagogicalTopicDto>> Handle(GetPedagogicalTopicCatalogQuery r, CancellationToken ct)
+    {
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        return (await topics.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId).OrderBy(x => x.Number).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Topic(x, mapper)).ToArray();
+    }
+}
+
+public sealed class CreatePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<CreatePedagogicalTopicCommand, PedagogicalTopicDto>
+{
+    public async Task<PedagogicalTopicDto> Handle(CreatePedagogicalTopicCommand r, CancellationToken ct)
+    {
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        if (await topics.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Number == r.Number, ct))
+            throw new ConflictApplicationException(ErrorKeys.PedagogicalTopicNumberConflict);
+
+        var code = $"SHEET-{r.Number:D3}";
+        if (await topics.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Code == code, ct))
+            code = $"SHEET-{r.Number:D3}-{Guid.NewGuid():N}"[..24].ToUpperInvariant();
+
+        var entity = PedagogicalTopic.Create(r.ReferentialVersionId, code, r.Number, r.Title, r.Category, r.DurationMinutes, r.Reference, r.Active, null, r.Objective, r.Example, r.Correction);
+        await topics.AddAsync(entity, ct);
+        return LearningProgressDtoFactory.Topic(entity, mapper);
+    }
+}
+
+public sealed class UpdatePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<UpdatePedagogicalTopicCommand, PedagogicalTopicDto>
+{
+    public async Task<PedagogicalTopicDto> Handle(UpdatePedagogicalTopicCommand r, CancellationToken ct)
+    {
+        var entity = await topics.GetByIdAsync(r.TopicId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PedagogicalTopicNotFound);
+        if (entity.ReferentialVersionId != r.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.TopicReferentialMismatch);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, entity.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        if (await topics.Query(false).AnyAsync(x => x.ReferentialVersionId == entity.ReferentialVersionId && x.Number == r.Number && x.Id != entity.Id, ct))
+            throw new ConflictApplicationException(ErrorKeys.PedagogicalTopicNumberConflict);
+
+        entity.UpdateCatalog(r.Number, r.Title, r.Category, r.DurationMinutes, r.Reference, r.Active, r.Objective, r.Example, r.Correction);
+        return LearningProgressDtoFactory.Topic(entity, mapper);
+    }
+}
+
+public sealed class DeletePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<DeletePedagogicalTopicCommand, bool>
+{
+    public async Task<bool> Handle(DeletePedagogicalTopicCommand r, CancellationToken ct)
+    {
+        var entity = await topics.GetByIdAsync(r.TopicId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PedagogicalTopicNotFound);
+        if (entity.ReferentialVersionId != r.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.TopicReferentialMismatch);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, entity.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        if (await progress.Query(false).AnyAsync(x => x.TopicId == entity.Id, ct))
+            throw new ConflictApplicationException(ErrorKeys.PedagogicalTopicInUse);
+        topics.Remove(entity);
+        return true;
+    }
+}
+
+public sealed class GetLearnerTopicsQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerTopicsQuery, IReadOnlyCollection<LearnerTopicProgressDto>>
 {
     public async Task<IReadOnlyCollection<LearnerTopicProgressDto>> Handle(GetLearnerTopicsQuery r, CancellationToken ct)
     {
@@ -135,29 +223,67 @@ public sealed class GetLearnerTopicsQueryHandler(IEnrollmentRepository enrollmen
         TenantScope.Ensure(current, enrollment.OrganizationId);
         await LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        await ContextualScope.EnsureCanViewCohortAsync(current, cohort, offerings, ct);
         var topicRows = await topics.Query(false).Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId && x.Active).OrderBy(x => x.Number).ToListAsync(ct);
-        var saved = await progress.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).ToListAsync(ct);
+        var saved = await progress.Query(false)
+            .Where(x => x.EnrollmentId == r.EnrollmentId)
+            .Include(x => x.EvaluationCriteria)
+            .ToListAsync(ct);
         var byTopic = saved.ToDictionary(x => x.TopicId);
         return topicRows.Select(t =>
         {
             byTopic.TryGetValue(t.Id, out var p);
-            return p is null ? new LearnerTopicProgressDto(Guid.Empty, enrollment.Id.Value, t.Id.Value, t.Code, t.Number, t.Title, t.Category, LearningProgressDtoFactory.TopicStatusCode(TopicProgressStatus.NotStarted), null, null, null, null, null) : LearningProgressDtoFactory.TopicProgress(p, t, mapper);
+            return p is null
+                ? new LearnerTopicProgressDto(
+                    Guid.Empty,
+                    enrollment.Id.Value,
+                    t.Id.Value,
+                    t.Code,
+                    t.Number,
+                    t.Title,
+                    t.Category,
+                    LearningProgressDtoFactory.TopicStatusCode(TopicProgressStatus.NotStarted),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    Array.Empty<TopicEvaluationCriterionDto>())
+                : LearningProgressDtoFactory.TopicProgress(p, t, mapper);
         }).ToArray();
     }
 }
 
-public sealed class UpdateTopicProgressCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateTopicProgressCommand, LearnerTopicProgressDto>
+public sealed class UpdateTopicProgressCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateTopicProgressCommand, LearnerTopicProgressDto>
 {
     public async Task<LearnerTopicProgressDto> Handle(UpdateTopicProgressCommand r, CancellationToken ct)
     {
         var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        await ContextualScope.EnsureCanManageCohortAsync(current, cohort, offerings, ct);
         var topic = await topics.GetByIdAsync(r.TopicId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PedagogicalTopicNotFound);
         if (topic.ReferentialVersionId != cohort.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.TopicReferentialMismatch);
         if (!LearningProgressDtoFactory.TryParseTopicStatus(r.Status, out var status))
             throw new ValidationApplicationException(ErrorKeys.TopicStatusInvalid);
+        var criteria = new List<(string Code, TopicEvaluationLevel Level)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var criterion in r.EvaluationCriteria ?? [])
+        {
+            if (criterion is null || string.IsNullOrWhiteSpace(criterion.Code))
+                throw new ValidationApplicationException(ErrorKeys.TopicEvaluationCriteriaInvalid);
+
+            var code = criterion.Code.Trim();
+            if (!seen.Add(code) || !LearningProgressDtoFactory.TryParseTopicEvaluationLevel(criterion.Level, out var level))
+                throw new ValidationApplicationException(ErrorKeys.TopicEvaluationCriteriaInvalid);
+
+            criteria.Add((code, level));
+        }
+
         var entity = await progress.FindAsync(r.EnrollmentId, r.TopicId, true, ct);
         if (entity is null)
         {
@@ -166,30 +292,42 @@ public sealed class UpdateTopicProgressCommandHandler(IEnrollmentRepository enro
         }
 
         // The evaluator identity comes from the authenticated token, never from the request body.
-        entity.Update(status, r.PreparationDate, r.PresentationDate, r.PresentationDurationMinutes,
-            current.DisplayName ?? current.Email, r.Comment);
+        entity.Update(
+            status,
+            r.PreparationDate,
+            r.PresentationDate,
+            r.PresentationDurationMinutes,
+            current.DisplayName ?? current.Email,
+            r.PositivePoints,
+            r.Improvements,
+            r.Comment,
+            r.NextObjective,
+            criteria);
         return LearningProgressDtoFactory.TopicProgress(entity, topic, mapper);
     }
 }
 
-public sealed class GetDrivingEvaluationsQueryHandler(IDrivingEvaluationRepository evaluations, IObjectMapper mapper, IEnrollmentRepository enrollments, ILearnerProfileRepository profiles, IPersonRepository people, ICurrentUser current) : IRequestHandler<GetDrivingEvaluationsQuery, IReadOnlyCollection<DrivingEvaluationDto>>
+public sealed class GetDrivingEvaluationsQueryHandler(IDrivingEvaluationRepository evaluations, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ILearnerProfileRepository profiles, IPersonRepository people, ICurrentUser current) : IRequestHandler<GetDrivingEvaluationsQuery, IReadOnlyCollection<DrivingEvaluationDto>>
 {
     public async Task<IReadOnlyCollection<DrivingEvaluationDto>> Handle(GetDrivingEvaluationsQuery r, CancellationToken ct)
     {
         var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
         await LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
+        var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        await ContextualScope.EnsureCanViewCohortAsync(current, cohort, offerings, ct);
         return (await evaluations.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).Include(x => x.Criteria).OrderByDescending(x => x.EvaluatedAtUtc).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Driving(x, mapper)).ToArray();
     }
 }
 
-public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
+public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
 {
     public async Task<DrivingEvaluationDto> Handle(RecordDrivingEvaluationCommand r, CancellationToken ct)
     {
         var enrollment = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         TenantScope.Ensure(current, enrollment.OrganizationId);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        await ContextualScope.EnsureCanManageCohortAsync(current, cohort, offerings, ct);
         var definition = await definitions.GetByIdAsync(r.CompetencyDefinitionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
         if (definition.ReferentialVersionId != cohort.ReferentialVersionId || !definition.Active)
             throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);

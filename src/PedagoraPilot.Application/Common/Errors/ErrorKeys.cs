@@ -21,6 +21,7 @@ public static class ErrorKeys
     public const string ReferentialTotalHoursInvalid = "REFERENTIAL_TOTAL_HOURS_INVALID";
     public const string ProgramOfferingNotFound = "PROGRAM_OFFERING_NOT_FOUND";
     public const string ProgramOfferingInactive = "PROGRAM_OFFERING_INACTIVE";
+    public const string ProgramOfferingActiveCohorts = "PROGRAM_OFFERING_ACTIVE_COHORTS";
     public const string ReferentialVersionNotActive = "REFERENTIAL_VERSION_NOT_ACTIVE";
     public const string CohortNotFound = "COHORT_NOT_FOUND";
     public const string CohortCodeAlreadyExists = "COHORT_CODE_ALREADY_EXISTS";
@@ -94,6 +95,8 @@ public static class ErrorKeys
     public const string CompetencyLevelInvalid = "COMPETENCY_LEVEL_INVALID";
     public const string CompetencyReferentialMismatch = "COMPETENCY_REFERENTIAL_MISMATCH";
     public const string PedagogicalTopicNotFound = "PEDAGOGICAL_TOPIC_NOT_FOUND";
+    public const string PedagogicalTopicNumberConflict = "PEDAGOGICAL_TOPIC_NUMBER_CONFLICT";
+    public const string PedagogicalTopicInUse = "PEDAGOGICAL_TOPIC_IN_USE";
     public const string TopicReferentialVersionRequired = "TOPIC_REFERENTIAL_VERSION_REQUIRED";
     public const string TopicCodeRequired = "TOPIC_CODE_REQUIRED";
     public const string TopicTitleRequired = "TOPIC_TITLE_REQUIRED";
@@ -104,6 +107,10 @@ public static class ErrorKeys
     public const string TopicProgressTopicRequired = "TOPIC_PROGRESS_TOPIC_REQUIRED";
     public const string TopicPresentationDurationInvalid = "TOPIC_PRESENTATION_DURATION_INVALID";
     public const string TopicStatusInvalid = "TOPIC_STATUS_INVALID";
+    public const string TopicEvaluationProgressRequired = "TOPIC_EVALUATION_PROGRESS_REQUIRED";
+    public const string TopicEvaluationCriterionCodeRequired = "TOPIC_EVALUATION_CRITERION_CODE_REQUIRED";
+    public const string TopicEvaluationCriterionCodeInvalid = "TOPIC_EVALUATION_CRITERION_CODE_INVALID";
+    public const string TopicEvaluationCriteriaInvalid = "TOPIC_EVALUATION_CRITERIA_INVALID";
     public const string TopicReferentialMismatch = "TOPIC_REFERENTIAL_MISMATCH";
     public const string DrivingOrganizationRequired = "DRIVING_ORGANIZATION_REQUIRED";
     public const string DrivingEnrollmentRequired = "DRIVING_ENROLLMENT_REQUIRED";
@@ -196,6 +203,7 @@ public static class ErrorKeys
     public const string RemoteWorkPeriodInvalid = "REMOTE_WORK_PERIOD_INVALID";
     public const string RemoteWorkOverlap = "REMOTE_WORK_OVERLAP";
     public const string RemoteWorkActivityStatusInvalid = "REMOTE_WORK_ACTIVITY_STATUS_INVALID";
+    public const string RemoteWorkMaxDaysInvalid = "REMOTE_WORK_MAX_DAYS_INVALID";
     public const string RemoteWorkRequestAlreadyDecided = "REMOTE_WORK_REQUEST_ALREADY_DECIDED";
     public const string RemoteWorkRequestLocked = "REMOTE_WORK_REQUEST_LOCKED";
     public const string ReportingDateRangeInvalid = "REPORTING_DATE_RANGE_INVALID";

@@ -78,9 +78,10 @@ internal static class DocumentApplication
     public static bool IsStudent(ICurrentUser current) =>
         PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(current)
         || current.Roles.Any(x => x.Equals("student", StringComparison.OrdinalIgnoreCase) || x.Equals("stagiaire", StringComparison.OrdinalIgnoreCase));
-    public static async Task EnsureCanReadAsync(ManagedDocument document, ICurrentUser current, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, CancellationToken ct)
+    public static async Task EnsureCanReadAsync(ManagedDocument document, ICurrentUser current, DocumentContextualAccess contextualAccess, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, CancellationToken ct)
     {
         TenantScope.Ensure(current, document.OrganizationId);
+        await contextualAccess.EnsureCanReadAsync(document, ct);
         if (!IsStudent(current))
             return;
         if (document.Visibility == DocumentVisibility.All)
@@ -96,7 +97,7 @@ internal static class DocumentApplication
     }
 }
 
-public sealed class GetDocumentsQueryHandler(IDocumentRepository documents, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetDocumentsQuery, IReadOnlyCollection<DocumentDto>>
+public sealed class GetDocumentsQueryHandler(IDocumentRepository documents, DocumentContextualAccess contextualAccess, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetDocumentsQuery, IReadOnlyCollection<DocumentDto>>
 {
     public async Task<IReadOnlyCollection<DocumentDto>> Handle(GetDocumentsQuery request, CancellationToken ct)
     {
@@ -122,16 +123,26 @@ public sealed class GetDocumentsQueryHandler(IDocumentRepository documents, ILea
         }
 
         var rows = await query.OrderByDescending(x => x.UpdatedAtUtc).ToListAsync(ct);
+        if (current.HasContextualScopeRestrictions)
+        {
+            var visible = new List<ManagedDocument>(rows.Count);
+            foreach (var row in rows)
+            {
+                if (await contextualAccess.CanReadAsync(row, ct))
+                    visible.Add(row);
+            }
+            rows = visible;
+        }
         return rows.Select(x => DocumentApplication.ToDto(x, mapper)).ToArray();
     }
 }
 
-public sealed class GetDocumentQueryHandler(IDocumentRepository documents, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetDocumentQuery, DocumentDto>
+public sealed class GetDocumentQueryHandler(IDocumentRepository documents, DocumentContextualAccess contextualAccess, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetDocumentQuery, DocumentDto>
 {
     public async Task<DocumentDto> Handle(GetDocumentQuery request, CancellationToken ct)
     {
         var document = await documents.Query(false).Include(x => x.Versions).SingleOrDefaultAsync(x => x.Id == request.DocumentId && x.Status == DocumentStatus.Active, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DocumentNotFound);
-        await DocumentApplication.EnsureCanReadAsync(document, current, learnerProfiles, enrollments, ct);
+        await DocumentApplication.EnsureCanReadAsync(document, current, contextualAccess, learnerProfiles, enrollments, ct);
         return DocumentApplication.ToDto(document, mapper);
     }
 
@@ -141,7 +152,7 @@ public sealed class GetDocumentQueryHandler(IDocumentRepository documents, ILear
     }
 }
 
-public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current,
+public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current, ITransactionCompensation compensation, DocumentContextualAccess contextualAccess,
     ITrainingSiteRepository sites, ICohortRepository cohorts, IEnrollmentRepository enrollments,
     IWorkplacePeriodRepository periods, ICertificationCandidateRepository candidates,
     IProgramOfferingRepository offerings) : IRequestHandler<UploadDocumentCommand, DocumentDto>
@@ -159,6 +170,7 @@ public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, 
         if (ownerType != DocumentOwnerType.None && !request.OwnerId.HasValue)
             throw new ValidationApplicationException(ErrorKeys.DocumentOwnerRequired);
         var organizationId = current.OrganizationId.Value;
+        await contextualAccess.EnsureCanManageTargetAsync(request.SiteId, request.ProgramId, request.CohortId, ct);
         if (request.SiteId.HasValue && !await sites.Query(false).AnyAsync(x => x.Id == request.SiteId.Value && x.OrganizationId == organizationId, ct))
             throw new ForbiddenApplicationException(ErrorKeys.DocumentForbidden);
         if (request.CohortId.HasValue && !await cohorts.Query(false).AnyAsync(x => x.Id.Value == request.CohortId.Value && x.OrganizationId == organizationId && (!request.SiteId.HasValue || x.SiteId == request.SiteId.Value), ct))
@@ -184,6 +196,7 @@ public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, 
             var storageKey = DocumentApplication.BuildStorageKey(current.OrganizationId.Value, document.Id, 1, request.FileName);
             await using var upload = new FileStream(buffered.TempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             await storage.PutAsync(storageKey, upload, request.ContentType, ct);
+            compensation.Register(cleanupCt => storage.DeleteAsync(storageKey, cleanupCt));
             document.AddVersion(request.FileName, request.ContentType, buffered.SizeBytes, buffered.Sha256, storageKey, true, DocumentSecurityStatus.Clean, current.UserId?.ToString() ?? "authgate", request.AuthorDisplayName);
             await documents.AddAsync(document, ct);
             return DocumentApplication.ToDto(document, mapper);
@@ -211,12 +224,13 @@ public sealed class UploadDocumentCommandHandler(IDocumentRepository documents, 
     };
 }
 
-public sealed class ReplaceDocumentVersionCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<ReplaceDocumentVersionCommand, DocumentDto>
+public sealed class ReplaceDocumentVersionCommandHandler(IDocumentRepository documents, IObjectStorage storage, IFileSecurityScanner securityScanner, IDocumentStoragePolicy policy, IObjectMapper mapper, ICurrentUser current, ITransactionCompensation compensation, DocumentContextualAccess contextualAccess) : IRequestHandler<ReplaceDocumentVersionCommand, DocumentDto>
 {
     public async Task<DocumentDto> Handle(ReplaceDocumentVersionCommand request, CancellationToken ct)
     {
         var document = await documents.Query(true).Include(x => x.Versions).SingleOrDefaultAsync(x => x.Id == request.DocumentId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DocumentNotFound);
         GetDocumentQueryHandler.EnsureOrganization(document, current);
+        await contextualAccess.EnsureCanManageAsync(document, ct);
         if (!policy.IsAllowed(request.FileName, request.ContentType))
             throw new ValidationApplicationException(ErrorKeys.DocumentFileTypeNotAllowed);
         var buffered = await DocumentApplication.BufferAndHashAsync(request.Content, request.SizeBytes, policy.MaxFileSizeBytes, ct);
@@ -229,6 +243,7 @@ public sealed class ReplaceDocumentVersionCommandHandler(IDocumentRepository doc
             var storageKey = DocumentApplication.BuildStorageKey(document.OrganizationId, document.Id, next, request.FileName);
             await using var upload = new FileStream(buffered.TempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             await storage.PutAsync(storageKey, upload, request.ContentType, ct);
+            compensation.Register(cleanupCt => storage.DeleteAsync(storageKey, cleanupCt));
             document.AddVersion(request.FileName, request.ContentType, buffered.SizeBytes, buffered.Sha256, storageKey, true, DocumentSecurityStatus.Clean, current.UserId?.ToString() ?? "authgate", request.AuthorDisplayName);
             return DocumentApplication.ToDto(document, mapper);
         }
@@ -240,12 +255,13 @@ public sealed class ReplaceDocumentVersionCommandHandler(IDocumentRepository doc
     }
 }
 
-public sealed class UpdateDocumentMetadataCommandHandler(IDocumentRepository documents, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<UpdateDocumentMetadataCommand, DocumentDto>
+public sealed class UpdateDocumentMetadataCommandHandler(IDocumentRepository documents, IObjectMapper mapper, ICurrentUser current, DocumentContextualAccess contextualAccess) : IRequestHandler<UpdateDocumentMetadataCommand, DocumentDto>
 {
     public async Task<DocumentDto> Handle(UpdateDocumentMetadataCommand request, CancellationToken ct)
     {
         var document = await documents.Query(true).Include(x => x.Versions).SingleOrDefaultAsync(x => x.Id == request.DocumentId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DocumentNotFound);
         GetDocumentQueryHandler.EnsureOrganization(document, current);
+        await contextualAccess.EnsureCanManageAsync(document, ct);
         if (!DocumentApplication.TryCategory(request.Category, out var category))
             throw new ValidationApplicationException(ErrorKeys.DocumentCategoryInvalid);
         if (!DocumentApplication.TryVisibility(request.Visibility, out var visibility))
@@ -255,23 +271,24 @@ public sealed class UpdateDocumentMetadataCommandHandler(IDocumentRepository doc
     }
 }
 
-public sealed class DeleteDocumentCommandHandler(IDocumentRepository documents, ICurrentUser current) : IRequestHandler<DeleteDocumentCommand, bool>
+public sealed class DeleteDocumentCommandHandler(IDocumentRepository documents, ICurrentUser current, DocumentContextualAccess contextualAccess) : IRequestHandler<DeleteDocumentCommand, bool>
 {
     public async Task<bool> Handle(DeleteDocumentCommand request, CancellationToken ct)
     {
         var document = await documents.GetByIdAsync(request.DocumentId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DocumentNotFound);
         GetDocumentQueryHandler.EnsureOrganization(document, current);
+        await contextualAccess.EnsureCanManageAsync(document, ct);
         document.Delete();
         return true;
     }
 }
 
-public sealed class DownloadDocumentQueryHandler(IDocumentRepository documents, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectStorage storage, ICurrentUser current) : IRequestHandler<DownloadDocumentQuery, DocumentDownloadDto>
+public sealed class DownloadDocumentQueryHandler(IDocumentRepository documents, DocumentContextualAccess contextualAccess, ILearnerProfileRepository learnerProfiles, IEnrollmentRepository enrollments, IObjectStorage storage, ICurrentUser current) : IRequestHandler<DownloadDocumentQuery, DocumentDownloadDto>
 {
     public async Task<DocumentDownloadDto> Handle(DownloadDocumentQuery request, CancellationToken ct)
     {
         var document = await documents.Query(false).Include(x => x.Versions).SingleOrDefaultAsync(x => x.Id == request.DocumentId && x.Status == DocumentStatus.Active, ct) ?? throw new NotFoundApplicationException(ErrorKeys.DocumentNotFound);
-        await DocumentApplication.EnsureCanReadAsync(document, current, learnerProfiles, enrollments, ct);
+        await DocumentApplication.EnsureCanReadAsync(document, current, contextualAccess, learnerProfiles, enrollments, ct);
         var version = request.VersionId.HasValue ? document.Versions.SingleOrDefault(x => x.Id == request.VersionId.Value) : document.CurrentVersion;
         if (version is null)
             throw new NotFoundApplicationException(ErrorKeys.DocumentVersionNotFound);

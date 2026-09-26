@@ -43,6 +43,7 @@ public sealed class PedagoraPilotDbContext : DbContext
     public DbSet<LearnerCompetencyRecord> LearnerCompetencyRecords => Set<LearnerCompetencyRecord>();
     public DbSet<PedagogicalTopic> PedagogicalTopics => Set<PedagogicalTopic>();
     public DbSet<LearnerTopicProgress> LearnerTopicProgressRows => Set<LearnerTopicProgress>();
+    public DbSet<LearnerTopicEvaluationCriterion> LearnerTopicEvaluationCriteria => Set<LearnerTopicEvaluationCriterion>();
     public DbSet<DrivingEvaluation> DrivingEvaluations => Set<DrivingEvaluation>();
     public DbSet<DrivingEvaluationCriterion> DrivingEvaluationCriteria => Set<DrivingEvaluationCriterion>();
     public DbSet<WorkplacePeriod> WorkplacePeriods => Set<WorkplacePeriod>();

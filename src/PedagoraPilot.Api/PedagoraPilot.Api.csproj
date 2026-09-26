@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>PedagoraPilot.Api</UserSecretsId>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PedagoraPilot.Application\PedagoraPilot.Application.csproj" />
     <ProjectReference Include="..\PedagoraPilot.Infrastructure\PedagoraPilot.Infrastructure.csproj" />

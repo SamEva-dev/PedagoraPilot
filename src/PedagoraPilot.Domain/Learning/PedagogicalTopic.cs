@@ -8,7 +8,7 @@ public sealed class PedagogicalTopic : AggregateRoot<PedagogicalTopicId>
     {
     }
 
-    private PedagogicalTopic(PedagogicalTopicId id, Guid referentialVersionId, string code, int? number, string title, string category, int durationMinutes, string? reference, bool active, string? externalKey) : base(id)
+    private PedagogicalTopic(PedagogicalTopicId id, Guid referentialVersionId, string code, int? number, string title, string category, int durationMinutes, string? reference, bool active, string? externalKey, string? objective, string? example, string? correction) : base(id)
     {
         if (referentialVersionId == Guid.Empty)
             throw new DomainException("TOPIC_REFERENTIAL_VERSION_REQUIRED");
@@ -23,6 +23,9 @@ public sealed class PedagogicalTopic : AggregateRoot<PedagogicalTopicId>
         Reference = Optional(reference, 500);
         Active = active;
         ExternalKey = Optional(externalKey, 120);
+        Objective = Optional(objective, 2000);
+        Example = Optional(example, 4000);
+        Correction = Optional(correction, 8000);
         CreatedAtUtc = UpdatedAtUtc = DateTime.UtcNow;
         Version = 1;
     }
@@ -36,11 +39,32 @@ public sealed class PedagogicalTopic : AggregateRoot<PedagogicalTopicId>
     public string? Reference { get; private set; }
     public bool Active { get; private set; }
     public string? ExternalKey { get; private set; }
+    public string? Objective { get; private set; }
+    public string? Example { get; private set; }
+    public string? Correction { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public long Version { get; private set; }
 
-    public static PedagogicalTopic Create(Guid referentialVersionId, string code, int? number, string title, string category, int durationMinutes, string? reference = null, bool active = true, string? externalKey = null) => new(PedagogicalTopicId.New(), referentialVersionId, code, number, title, category, durationMinutes, reference, active, externalKey);
+    public static PedagogicalTopic Create(Guid referentialVersionId, string code, int? number, string title, string category, int durationMinutes, string? reference = null, bool active = true, string? externalKey = null, string? objective = null, string? example = null, string? correction = null) => new(PedagogicalTopicId.New(), referentialVersionId, code, number, title, category, durationMinutes, reference, active, externalKey, objective, example, correction);
+
+    public void UpdateCatalog(int? number, string title, string category, int durationMinutes, string? reference, bool active, string? objective, string? example, string? correction)
+    {
+        if (durationMinutes <= 0 || durationMinutes > 1440)
+            throw new DomainException("TOPIC_DURATION_INVALID");
+
+        Number = number;
+        Title = Required(title, "TOPIC_TITLE_REQUIRED", 300);
+        Category = Required(category, "TOPIC_CATEGORY_REQUIRED", 80);
+        DurationMinutes = durationMinutes;
+        Reference = Optional(reference, 500);
+        Active = active;
+        Objective = Optional(objective, 2000);
+        Example = Optional(example, 4000);
+        Correction = Optional(correction, 8000);
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+    }
     private static string Required(string value, string key, int max)
     {
         if (string.IsNullOrWhiteSpace(value))

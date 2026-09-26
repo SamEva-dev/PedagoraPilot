@@ -11,7 +11,7 @@ using PedagoraPilot.Domain.Learning;
 namespace PedagoraPilot.Application.Learning.Progress;
 
 public sealed class GetCohortCompetenciesQueryHandler(
-    ICohortRepository cohorts, IEnrollmentRepository enrollments,
+    ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments,
     ILearnerProfileRepository profiles, IPersonRepository people,
     ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records,
     IObjectMapper mapper, ICurrentUser current)
@@ -24,6 +24,7 @@ public sealed class GetCohortCompetenciesQueryHandler(
         var cohort = await cohorts.GetByIdAsync(request.CohortId, false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         TenantScope.Ensure(current, cohort.OrganizationId);
+        await ContextualScope.EnsureCanViewCohortAsync(current, cohort, offerings, ct);
 
         var members = await enrollments.Query(false)
             .Where(x => x.CohortId == cohort.Id && x.OrganizationId == cohort.OrganizationId)

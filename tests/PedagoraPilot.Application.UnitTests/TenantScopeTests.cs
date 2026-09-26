@@ -29,10 +29,13 @@ public sealed class TenantScopeTests
         ((Action)(() => TenantScope.Organization(new User(null, "PedagoraPlatformAdministrator"))))
             .Should().Throw<ForbiddenApplicationException>();
 
-    [Fact]
-    public void Signed_global_super_admin_can_access_multiple_organizations()
+    [Theory]
+    [InlineData("SuperAdmin")]
+    [InlineData("PlatformAdmin")]
+    [InlineData("PlatformAdministrator")]
+    public void Signed_global_platform_administrator_can_access_multiple_organizations(string role)
     {
-        var user = new User(null, "SuperAdmin");
+        var user = new User(null, role);
         TenantScope.Organization(user).Should().BeNull();
         TenantScope.Ensure(user, OrganizationA);
         TenantScope.Ensure(user, OrganizationB);
@@ -48,6 +51,17 @@ public sealed class TenantScopeTests
         public string? DisplayName => null;
         public IReadOnlySet<string> Roles => new HashSet<string>(roles);
         public IReadOnlySet<string> Permissions => new HashSet<string>();
-        public bool HasPermission(string permission) => false;
+        public IReadOnlyCollection<ContextualScopeAssignment> ContextualScopes => Array.Empty<ContextualScopeAssignment>();
+        public bool HasContextualScopeRestrictions => false;
+        public bool IsPlatformAdministrator => Roles.Any(role => role.Equals("PlatformAdministrator", StringComparison.OrdinalIgnoreCase) || role.Equals("PlatformAdmin", StringComparison.OrdinalIgnoreCase) || role.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase));
+        public bool HasPermission(string permission) => IsPlatformAdministrator;
+        public bool CanViewSite(Guid siteId) => true;
+        public bool CanManageSite(Guid siteId) => true;
+        public bool CanViewProgram(Guid siteId, Guid programId) => true;
+        public bool CanManageProgram(Guid siteId, Guid programId) => true;
+        public bool CanViewCohort(Guid siteId, Guid programId, Guid cohortId) => true;
+        public bool CanManageCohort(Guid siteId, Guid programId, Guid cohortId) => true;
+        public bool CanViewExam(Guid siteId, Guid programId, Guid cohortId, Guid examSessionId) => true;
+        public bool CanManageExam(Guid siteId, Guid programId, Guid cohortId, Guid examSessionId) => true;
     }
 }
