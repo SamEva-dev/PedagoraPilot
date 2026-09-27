@@ -69,7 +69,7 @@ public sealed class TrainingSession : AggregateRoot<TrainingSessionId>
     public static TrainingSession Create(Guid organizationId, Guid siteId, CohortId cohortId, TrainingSessionType type, TrainingSessionModality modality, string title, DateTimeOffset startsAtUtc, DateTimeOffset endsAtUtc, string timeZoneId, string? trainerAuthGateUserId = null, string? trainerDisplayName = null, string? location = null, string? objective = null, string? supports = null, string? comments = null, SessionAudienceMode audienceMode = SessionAudienceMode.WholeCohort, IEnumerable<EnrollmentId>? participantEnrollmentIds = null, string? externalKey = null)
     {
         var entity = new TrainingSession(TrainingSessionId.New(), organizationId, siteId, cohortId, type, modality, title, startsAtUtc, endsAtUtc, timeZoneId, trainerAuthGateUserId, trainerDisplayName, location, objective, supports, comments, audienceMode, participantEnrollmentIds, externalKey);
-        entity.RaiseDomainEvent(new TrainingSessionCreatedDomainEvent(entity.Id, organizationId, cohortId));
+        entity.RaiseDomainEvent(new TrainingSessionCreatedDomainEvent(entity.Id, organizationId, siteId, cohortId));
         return entity;
     }
 
@@ -93,7 +93,7 @@ public sealed class TrainingSession : AggregateRoot<TrainingSessionId>
         AudienceMode = audienceMode;
         SetParticipants(audienceMode, participantEnrollmentIds);
         UpdatedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new TrainingSessionUpdatedDomainEvent(Id, OrganizationId));
+        RaiseDomainEvent(new TrainingSessionUpdatedDomainEvent(Id, OrganizationId, SiteId, CohortId));
     }
 
     public void Start()
@@ -102,6 +102,7 @@ public sealed class TrainingSession : AggregateRoot<TrainingSessionId>
             throw new DomainException("SESSION_CANNOT_START");
         Status = TrainingSessionStatus.InProgress;
         UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new TrainingSessionUpdatedDomainEvent(Id, OrganizationId, SiteId, CohortId));
     }
 
     public void Complete()
@@ -110,7 +111,7 @@ public sealed class TrainingSession : AggregateRoot<TrainingSessionId>
             throw new DomainException("SESSION_CANNOT_COMPLETE");
         Status = TrainingSessionStatus.Completed;
         UpdatedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new TrainingSessionUpdatedDomainEvent(Id, OrganizationId));
+        RaiseDomainEvent(new TrainingSessionUpdatedDomainEvent(Id, OrganizationId, SiteId, CohortId));
     }
 
     public void Cancel()
@@ -121,7 +122,7 @@ public sealed class TrainingSession : AggregateRoot<TrainingSessionId>
             return;
         Status = TrainingSessionStatus.Cancelled;
         UpdatedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new TrainingSessionCancelledDomainEvent(Id, OrganizationId));
+        RaiseDomainEvent(new TrainingSessionCancelledDomainEvent(Id, OrganizationId, SiteId, CohortId));
     }
 
     private void SetParticipants(SessionAudienceMode audienceMode, IEnumerable<EnrollmentId>? participantEnrollmentIds)

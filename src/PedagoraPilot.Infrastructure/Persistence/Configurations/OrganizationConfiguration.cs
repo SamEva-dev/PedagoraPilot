@@ -40,6 +40,11 @@ public sealed class OrganizationConfiguration : IEntityTypeConfiguration<Organiz
         builder.Property(x => x.Timezone).HasMaxLength(64).IsRequired();
         builder.Property(x => x.DateFormat).HasMaxLength(32).IsRequired();
         builder.Property(x => x.AcademicYear).HasMaxLength(32).IsRequired();
+        builder.Property(x => x.VerificationStatus).HasConversion<string>().HasMaxLength(32).IsRequired();
+        builder.Property(x => x.VerificationComment).HasMaxLength(500).IsRequired();
+        builder.Property(x => x.SubscriptionPlan).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.SubscriptionStatus).HasConversion<string>().HasMaxLength(32).IsRequired();
+        builder.Property(x => x.BillingCustomerReference).HasMaxLength(128).IsRequired();
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();

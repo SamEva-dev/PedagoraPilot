@@ -29,10 +29,10 @@ public sealed class CertificationController(IMediator mediator) : ControllerBase
     [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
     public Task<int> RegisterCandidates(Guid id, CancellationToken ct) => mediator.Send(new RegisterCohortCandidatesCommand(new CertificationExamSessionId(id)), ct);
     [HttpGet("sessions/{id:guid}/candidates")]
-    [HasPermission(PedagoraPilotPermissionCodes.Certification.View)]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.CandidateView)]
     public Task<IReadOnlyCollection<CertificationCandidateDto>> Candidates(Guid id, CancellationToken ct) => mediator.Send(new GetCertificationCandidatesQuery(new CertificationExamSessionId(id)), ct);
     [HttpPost("sessions/{id:guid}/jury")]
-    [HasPermission(PedagoraPilotPermissionCodes.Jury.Evaluate)]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
     public Task<JuryAssignmentDto> AssignJury(Guid id, AssignJuryRequest r, CancellationToken ct) => mediator.Send(new AssignJuryCommand(new CertificationExamSessionId(id), r.AuthGateUserId, r.DisplayName, r.Role), ct);
     [HttpPut("candidates/{id:guid}/eligibility")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]

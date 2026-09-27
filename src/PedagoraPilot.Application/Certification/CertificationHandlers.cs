@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Application.Common.Errors;
+using PedagoraPilot.Application.Training.Learners;
 using PedagoraPilot.Contracts.Certification;
 using PedagoraPilot.Domain.Certification;
 using PedagoraPilot.Domain.Identifiers;
@@ -47,7 +48,7 @@ public sealed class GetCertificationSchemesQueryHandler(ICertificationSchemeRepo
     }
 }
 
-public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamSessionRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<GetCertificationExamSessionsQuery, IReadOnlyCollection<CertificationExamSessionDto>>
+public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamSessionRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<GetCertificationExamSessionsQuery, IReadOnlyCollection<CertificationExamSessionDto>>
 {
     public async Task<IReadOnlyCollection<CertificationExamSessionDto>> Handle(GetCertificationExamSessionsQuery r, CancellationToken ct)
     {
@@ -59,6 +60,15 @@ public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamS
             q = q.Where(x => x.CohortId == r.CohortId.Value);
         var rows = await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct);
         rows = await CertificationContextualAccess.FilterSessionsAsync(rows, cohorts, offerings, current, ct);
+        if (CertificationActorAccess.IsJury(current) && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Certification.Manage))
+        {
+            if (!current.UserId.HasValue) return Array.Empty<CertificationExamSessionDto>();
+            var assignedIds = await juries.Query(false)
+                .Where(x => x.OrganizationId == current.OrganizationId && x.AuthGateUserId == current.UserId.Value)
+                .Select(x => x.ExamSessionId)
+                .ToArrayAsync(ct);
+            rows = rows.Where(x => assignedIds.Contains(x.Id)).ToList();
+        }
         return rows.Select(CertMap.Session).ToArray();
     }
 }
@@ -71,6 +81,7 @@ public sealed class GetCertificationCandidatesQueryHandler(
     IEnrollmentRepository enrollments,
     ILearnerProfileRepository learnerProfiles,
     IPersonRepository people,
+    IJuryAssignmentRepository juries,
     ICurrentUser current) : IRequestHandler<GetCertificationCandidatesQuery, IReadOnlyCollection<CertificationCandidateDto>>
 {
     public async Task<IReadOnlyCollection<CertificationCandidateDto>> Handle(GetCertificationCandidatesQuery r, CancellationToken ct)
@@ -78,12 +89,25 @@ public sealed class GetCertificationCandidatesQueryHandler(
         var session = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, session.OrganizationId);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: false, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
         var q = repo.Query(false).Include(x => x.Assessments).Where(x => x.ExamSessionId == r.SessionId).AsQueryable();
         var organizationId = TenantScope.Organization(current);
         if (organizationId.HasValue)
             q = q.Where(x => x.OrganizationId == organizationId.Value);
 
         var rows = await q.ToListAsync(ct);
+
+        if (CertificationActorAccess.IsStudent(current))
+        {
+            var self = await LearnerSelfAccess.ResolveProfileAsync(learnerProfiles, people, current, ct)
+                ?? throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+            var selfEnrollmentIds = await enrollments.Query(false)
+                .Where(x => x.LearnerProfileId == self.Id)
+                .Select(x => x.Id)
+                .ToArrayAsync(ct);
+            rows = rows.Where(x => selfEnrollmentIds.Contains(x.EnrollmentId)).ToList();
+        }
+
         if (rows.Count == 0)
             return Array.Empty<CertificationCandidateDto>();
 
@@ -177,7 +201,7 @@ public sealed class EvaluateCertificationEligibilityCommandHandler(ICertificatio
     }
 }
 
-public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCandidateRepository candidates, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentCommand, CertificationCandidateDto>
+public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCandidateRepository candidates, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(RecordCertificationAssessmentCommand r, CancellationToken ct)
     {
@@ -185,6 +209,7 @@ public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCa
         TenantScope.Ensure(current, x.OrganizationId);
         var session = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
         var scheme = await schemes.Query(false).Include(a => a.Steps).SingleOrDefaultAsync(a => a.Id == session.SchemeId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSchemeNotFound);
         if (scheme.Steps.All(a => a.Id != r.StepDefinitionId))
             throw new ValidationApplicationException(ErrorKeys.CertificationStepNotFound);

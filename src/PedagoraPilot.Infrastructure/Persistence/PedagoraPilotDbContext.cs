@@ -11,6 +11,7 @@ using PedagoraPilot.Domain.Certification;
 using PedagoraPilot.Domain.DistanceLearning;
 using PedagoraPilot.Domain.Workforce;
 using PedagoraPilot.Domain.Audit;
+using PedagoraPilot.Domain.Access;
 using PedagoraPilot.Infrastructure.Persistence.Catalog;
 using PedagoraPilot.Infrastructure.Persistence.Idempotency;
 
@@ -68,6 +69,17 @@ public sealed class PedagoraPilotDbContext : DbContext
     public DbSet<RemoteWorkRequest> RemoteWorkRequests => Set<RemoteWorkRequest>();
     public DbSet<RemoteWorkActivity> RemoteWorkActivities => Set<RemoteWorkActivity>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
+    public DbSet<AccessInvitation> AccessInvitations => Set<AccessInvitation>();
+    public DbSet<OrganizationAdministratorProfile> OrganizationAdministratorProfiles => Set<OrganizationAdministratorProfile>();
+    public DbSet<OrganizationDirectionProfile> OrganizationDirectionProfiles => Set<OrganizationDirectionProfile>();
+    public DbSet<SiteDirectionProfile> SiteDirectionProfiles => Set<SiteDirectionProfile>();
+    public DbSet<PedagogicalManagerProfile> PedagogicalManagerProfiles => Set<PedagogicalManagerProfile>();
+    public DbSet<SecretariatProfile> SecretariatProfiles => Set<SecretariatProfile>();
+    public DbSet<TrainerProfile> TrainerProfiles => Set<TrainerProfile>();
+    public DbSet<StudentProfile> StudentProfiles => Set<StudentProfile>();
+    public DbSet<JuryProfile> JuryProfiles => Set<JuryProfile>();
+    public DbSet<ReadOnlyProfile> ReadOnlyProfiles => Set<ReadOnlyProfile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +92,8 @@ public sealed class PedagoraPilotDbContext : DbContext
     {
         var now = DateTime.UtcNow;
         Touch<Organization>(now);
+        Touch<OrganizationMember>(now);
+        Touch<AccessInvitation>(now);
         Touch<TrainingSite>(now);
         Touch<ProgramFamily>(now);
         Touch<TrainingProgram>(now);
@@ -130,19 +144,37 @@ public sealed class PedagoraPilotDbContext : DbContext
 
     private void SyncCapabilities()
     {
-        foreach (var e in ChangeTracker.Entries<TrainingProgram>().Where(e => e.State is EntityState.Added or EntityState.Modified))
+        // Snapshot tracked entries before adding/removing capability rows.
+        // ProgramCapabilities.Add/RemoveRange changes the ChangeTracker; enumerating
+        // ChangeTracker.Entries<T>() at the same time can invalidate its internal
+        // dictionary enumerator and throw "Collection was modified".
+        var programs = ChangeTracker
+            .Entries<TrainingProgram>()
+            .Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .ToList();
+
+        foreach (var e in programs)
         {
             var id = e.Entity.Id;
+            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
+
             ProgramCapabilities.RemoveRange(ProgramCapabilities.Where(x => x.ProgramId == id));
-            foreach (var c in e.Entity.Capabilities)
+            foreach (var c in capabilities)
                 ProgramCapabilities.Add(new ProgramCapabilityRow { ProgramId = id, CapabilityCode = c });
         }
 
-        foreach (var e in ChangeTracker.Entries<ReferentialVersion>().Where(e => e.State is EntityState.Added or EntityState.Modified))
+        var referentialVersions = ChangeTracker
+            .Entries<ReferentialVersion>()
+            .Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .ToList();
+
+        foreach (var e in referentialVersions)
         {
             var id = e.Entity.Id;
+            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
+
             ReferentialVersionCapabilities.RemoveRange(ReferentialVersionCapabilities.Where(x => x.ReferentialVersionId == id));
-            foreach (var c in e.Entity.Capabilities)
+            foreach (var c in capabilities)
                 ReferentialVersionCapabilities.Add(new ReferentialVersionCapabilityRow { ReferentialVersionId = id, CapabilityCode = c });
         }
     }

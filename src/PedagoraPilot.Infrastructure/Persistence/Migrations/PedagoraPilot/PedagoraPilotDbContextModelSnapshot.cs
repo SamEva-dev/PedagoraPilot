@@ -101,6 +101,362 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.ToTable("outbox_messages", "integration");
                 });
 
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.AccessInvitation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AcceptedAuthGateUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CohortId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<Guid?>("ExamSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("InvitedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ProgramId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RequestedRole")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid?>("SiteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "Email", "Status");
+
+                    b.HasIndex("OrganizationId", "Status", "ExpiresAtUtc");
+
+                    b.ToTable("access_invitations", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.JuryProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("jury_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.OrganizationAdministratorProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("organization_administrator_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.OrganizationDirectionProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("organization_direction_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.OrganizationMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AuthGateUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "AuthGateUserId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "Email");
+
+                    b.ToTable("organization_members", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.PedagogicalManagerProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("pedagogical_manager_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.ReadOnlyProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("read_only_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.SecretariatProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("secretariat_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.SiteDirectionProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("site_direction_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.StudentProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("student_profiles", "organization");
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Access.TrainerProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemberId")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "IsActive");
+
+                    b.ToTable("trainer_profiles", "organization");
+                });
+
             modelBuilder.Entity("PedagoraPilot.Domain.Audit.AuditEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -412,8 +768,7 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
 
                     b.Property<string>("DescriptionKey")
                         .IsRequired()
-                        .HasMaxLength(220)
-                        .HasColumnType("character varying(220)")
+                        .HasColumnType("text")
                         .HasColumnName("description_key");
 
                     b.Property<int>("DurationHours")
@@ -441,6 +796,10 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .HasColumnType("character varying(220)")
                         .HasColumnName("name");
 
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("organization_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -459,9 +818,17 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.HasKey("Id");
 
                     b.HasIndex("Code")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"organization_id\" IS NULL");
 
                     b.HasIndex("ExternalKey")
+                        .IsUnique()
+                        .HasFilter("\"organization_id\" IS NULL AND \"external_key\" IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "ExternalKey")
                         .IsUnique();
 
                     b.ToTable("training_programs", "catalog");
@@ -1614,6 +1981,11 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.Property<bool>("AutoArchive")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("BillingCustomerReference")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<bool>("CertificationAlerts")
                         .HasColumnType("boolean");
 
@@ -1673,6 +2045,9 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .IsRequired()
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime?>("OnboardingCompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("OwnerEmail")
                         .IsRequired()
@@ -1734,6 +2109,16 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.Property<bool>("StrictAudit")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("SubscriptionPlan")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SubscriptionStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("Timezone")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1744,7 +2129,26 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<DateTime?>("TrialEndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VerificationComment")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("VerificationSubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<long>("Version")
@@ -1871,6 +2275,13 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PedagogicalManagerAuthGateUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PedagogicalManagerDisplayName")
+                        .HasMaxLength(220)
+                        .HasColumnType("character varying(220)");
 
                     b.Property<Guid>("ProgramOfferingId")
                         .HasColumnType("uuid");

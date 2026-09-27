@@ -35,6 +35,10 @@ public sealed class Organization : AggregateRoot, IAuditableEntity
         RemoteWorkMaxDaysPerWeek = 2;
         RemoteWorkHalfDayAllowed = true;
         RemoteWorkEndOfDayReport = true;
+        VerificationStatus = OrganizationVerificationStatus.Unverified;
+        SubscriptionPlan = "trial";
+        SubscriptionStatus = OrganizationSubscriptionStatus.Trial;
+        TrialEndsAtUtc = DateTime.UtcNow.AddDays(30);
         Status = OrganizationStatus.Active;
         CreatedAtUtc = DateTime.UtcNow;
         UpdatedAtUtc = CreatedAtUtc;
@@ -79,6 +83,15 @@ public sealed class Organization : AggregateRoot, IAuditableEntity
     public int RemoteWorkMaxDaysPerWeek { get; private set; } = 2;
     public bool RemoteWorkHalfDayAllowed { get; private set; } = true;
     public bool RemoteWorkEndOfDayReport { get; private set; } = true;
+    public OrganizationVerificationStatus VerificationStatus { get; private set; } = OrganizationVerificationStatus.Unverified;
+    public DateTime? VerificationSubmittedAtUtc { get; private set; }
+    public DateTime? VerifiedAtUtc { get; private set; }
+    public string VerificationComment { get; private set; } = string.Empty;
+    public DateTime? OnboardingCompletedAtUtc { get; private set; }
+    public string SubscriptionPlan { get; private set; } = "trial";
+    public OrganizationSubscriptionStatus SubscriptionStatus { get; private set; } = OrganizationSubscriptionStatus.Trial;
+    public DateTime? TrialEndsAtUtc { get; private set; }
+    public string BillingCustomerReference { get; private set; } = string.Empty;
     public OrganizationStatus Status { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
@@ -165,7 +178,7 @@ public sealed class Organization : AggregateRoot, IAuditableEntity
 
         LegalName = legalName.Trim();
         ShortName = string.IsNullOrWhiteSpace(shortName) ? LegalName : shortName.Trim();
-        Siret = NormalizeText(siret);
+        Siret = NormalizeSiret(siret, countryCode);
         TrainingDeclarationNumber = NormalizeText(trainingDeclarationNumber);
         Address = NormalizeText(address);
         PostalCode = NormalizeText(postalCode);
@@ -203,6 +216,54 @@ public sealed class Organization : AggregateRoot, IAuditableEntity
         RaiseDomainEvent(@event);
     }
 
+
+    public void SubmitVerification()
+    {
+        if (string.IsNullOrWhiteSpace(Siret))
+            throw new DomainException("ORGANIZATION_SIRET_REQUIRED");
+        if (CountryCode == "FR" && !IsValidFrenchSiret(Siret))
+            throw new DomainException("ORGANIZATION_SIRET_INVALID");
+        if (string.IsNullOrWhiteSpace(LegalName) || string.IsNullOrWhiteSpace(Address) || string.IsNullOrWhiteSpace(City))
+            throw new DomainException("ORGANIZATION_VERIFICATION_PROFILE_INCOMPLETE");
+
+        VerificationStatus = OrganizationVerificationStatus.Pending;
+        VerificationSubmittedAtUtc = DateTime.UtcNow;
+        VerifiedAtUtc = null;
+        VerificationComment = string.Empty;
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+        RaiseDomainEvent(new OrganizationAdministrationUpdatedDomainEvent(Id));
+    }
+
+    public void SetVerificationStatus(OrganizationVerificationStatus status, string? comment)
+    {
+        VerificationStatus = status;
+        VerificationComment = NormalizeText(comment);
+        VerifiedAtUtc = status == OrganizationVerificationStatus.Verified ? DateTime.UtcNow : null;
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+        RaiseDomainEvent(new OrganizationAdministrationUpdatedDomainEvent(Id));
+    }
+
+    public void CompleteOnboarding()
+    {
+        OnboardingCompletedAtUtc ??= DateTime.UtcNow;
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+        RaiseDomainEvent(new OrganizationAdministrationUpdatedDomainEvent(Id));
+    }
+
+    public void SetCommercialState(string plan, OrganizationSubscriptionStatus status, DateTime? trialEndsAtUtc, string? billingCustomerReference)
+    {
+        SubscriptionPlan = string.IsNullOrWhiteSpace(plan) ? "trial" : plan.Trim().ToLowerInvariant();
+        SubscriptionStatus = status;
+        TrialEndsAtUtc = trialEndsAtUtc;
+        BillingCustomerReference = NormalizeText(billingCustomerReference);
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+        RaiseDomainEvent(new OrganizationAdministrationUpdatedDomainEvent(Id));
+    }
+
     private static string NormalizeCountry(string? value)
     {
         var country = string.IsNullOrWhiteSpace(value) ? "FR" : value.Trim().ToUpperInvariant();
@@ -215,6 +276,34 @@ public sealed class Organization : AggregateRoot, IAuditableEntity
     {
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
         return value.Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizeSiret(string? value, string? countryCode)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : new string(value.Where(char.IsDigit).ToArray());
+        var country = NormalizeCountry(countryCode);
+        if (normalized.Length > 0 && country == "FR" && !IsValidFrenchSiret(normalized))
+            throw new DomainException("ORGANIZATION_SIRET_INVALID");
+        return normalized;
+    }
+
+    private static bool IsValidFrenchSiret(string value)
+    {
+        if (value.Length != 14 || value.Any(c => !char.IsDigit(c))) return false;
+        var sum = 0;
+        for (var i = 0; i < value.Length; i++)
+        {
+            var digit = value[i] - '0';
+            if (i % 2 == 0)
+            {
+                digit *= 2;
+                if (digit > 9) digit -= 9;
+            }
+            sum += digit;
+        }
+        return sum % 10 == 0;
     }
 
     private static string NormalizeText(string? value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();

@@ -14,7 +14,10 @@ public sealed class GetProgramsQueryHandler(ITrainingProgramRepository programs,
         if (r.OrganizationId.HasValue)
             TenantScope.Ensure(current, r.OrganizationId.Value);
         var effectiveOrganization = organizationId ?? r.OrganizationId;
-        var ps = await programs.Query(false).OrderBy(x => x.Name).ToListAsync(ct);
+        var psQuery = programs.Query(false);
+        if (effectiveOrganization.HasValue)
+            psQuery = psQuery.Where(x => !x.OrganizationId.HasValue || x.OrganizationId == effectiveOrganization.Value);
+        var ps = await psQuery.OrderBy(x => x.Name).ToListAsync(ct);
         var caps = await programs.GetCapabilitiesAsync(ps.Select(x => x.Id), ct);
         var fs = await families.Query(false).ToDictionaryAsync(x => x.Id, x => x.Code, ct);
         var siteList = await sites.Query(false)
@@ -34,11 +37,11 @@ public sealed class GetProgramsQueryHandler(ITrainingProgramRepository programs,
         foreach (var p in ps)
         {
             var siteKeys = os.Where(x => x.ProgramId == p.Id).Select(x => ss.TryGetValue(x.SiteId, out var s) ? s.ExternalKey ?? s.Id.ToString() : x.SiteId.ToString()).ToArray();
-            if (effectiveOrganization.HasValue && !os.Any(x => x.ProgramId == p.Id))
+            if (effectiveOrganization.HasValue && !p.OrganizationId.HasValue && !os.Any(x => x.ProgramId == p.Id))
                 continue;
             var rid = rs.FirstOrDefault(x => x.ProgramId == p.Id)?.Id;
             var rv = rid.HasValue ? vs.FirstOrDefault(x => x.ReferentialId == rid.Value) : null;
-            result.Add(ProgramDtoFactory.Create(p, fs.GetValueOrDefault(p.FamilyId, "OTHER"), siteKeys, rv?.VersionLabel, caps.GetValueOrDefault(p.Id, Array.Empty<string>())));
+            result.Add(ProgramDtoFactory.Create(p, fs.GetValueOrDefault(p.FamilyId, "OTHER"), siteKeys, rv is null ? null : ReferentialVersionText.Display(rv), caps.GetValueOrDefault(p.Id, Array.Empty<string>())));
         }
 
         return result;

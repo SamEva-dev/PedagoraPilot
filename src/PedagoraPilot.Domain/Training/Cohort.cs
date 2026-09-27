@@ -9,7 +9,7 @@ public sealed class Cohort : AggregateRoot<CohortId>
     {
     }
 
-    private Cohort(CohortId id, Guid organizationId, Guid siteId, Guid programOfferingId, Guid referentialVersionId, string code, string name, DateOnly startDate, DateOnly endDate, int capacity, string? externalKey) : base(id)
+    private Cohort(CohortId id, Guid organizationId, Guid siteId, Guid programOfferingId, Guid referentialVersionId, string code, string name, DateOnly startDate, DateOnly endDate, int capacity, Guid? pedagogicalManagerAuthGateUserId, string? pedagogicalManagerDisplayName, string? externalKey) : base(id)
     {
         OrganizationId = organizationId;
         SiteId = siteId;
@@ -22,6 +22,8 @@ public sealed class Cohort : AggregateRoot<CohortId>
         StartDate = startDate;
         EndDate = endDate;
         Capacity = capacity;
+        PedagogicalManagerAuthGateUserId = pedagogicalManagerAuthGateUserId;
+        PedagogicalManagerDisplayName = NormalizeOptional(pedagogicalManagerDisplayName);
         ExternalKey = NormalizeOptional(externalKey);
         Status = CohortStatus.Planned;
         CreatedAtUtc = UpdatedAtUtc = DateTime.UtcNow;
@@ -37,13 +39,18 @@ public sealed class Cohort : AggregateRoot<CohortId>
     public DateOnly StartDate { get; private set; }
     public DateOnly EndDate { get; private set; }
     public int Capacity { get; private set; }
+    public Guid? PedagogicalManagerAuthGateUserId { get; private set; }
+    public string? PedagogicalManagerDisplayName { get; private set; }
     public CohortStatus Status { get; private set; }
     public string? ExternalKey { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public long Version { get; private set; }
 
-    public static Cohort Create(Guid organizationId, Guid siteId, Guid programOfferingId, Guid referentialVersionId, string code, string name, DateOnly startDate, DateOnly endDate, int capacity, string? externalKey = null)
+    public static Cohort Create(Guid organizationId, Guid siteId, Guid programOfferingId, 
+        Guid referentialVersionId, string code, string name, DateOnly startDate, 
+        DateOnly endDate, int capacity, Guid? pedagogicalManagerAuthGateUserId, 
+        string? pedagogicalManagerDisplayName, string? externalKey = null)
     {
         if (organizationId == Guid.Empty)
             throw new DomainException("COHORT_ORGANIZATION_REQUIRED");
@@ -53,12 +60,12 @@ public sealed class Cohort : AggregateRoot<CohortId>
             throw new DomainException("COHORT_PROGRAM_OFFERING_REQUIRED");
         if (referentialVersionId == Guid.Empty)
             throw new DomainException("COHORT_REFERENTIAL_VERSION_REQUIRED");
-        var cohort = new Cohort(CohortId.New(), organizationId, siteId, programOfferingId, referentialVersionId, code, name, startDate, endDate, capacity, externalKey);
+        var cohort = new Cohort(CohortId.New(), organizationId, siteId, programOfferingId, referentialVersionId, code, name, startDate, endDate, capacity, pedagogicalManagerAuthGateUserId, pedagogicalManagerDisplayName, externalKey);
         cohort.RaiseDomainEvent(new CohortCreatedDomainEvent(cohort.Id, organizationId, programOfferingId));
         return cohort;
     }
 
-    public void Update(string name, DateOnly startDate, DateOnly endDate, int capacity, CohortStatus status)
+    public void Update(string name, DateOnly startDate, DateOnly endDate, int capacity, CohortStatus status, Guid? pedagogicalManagerAuthGateUserId = null, string? pedagogicalManagerDisplayName = null)
     {
         if (Status is CohortStatus.Completed or CohortStatus.Cancelled)
             throw new DomainException("COHORT_CLOSED");
@@ -68,6 +75,8 @@ public sealed class Cohort : AggregateRoot<CohortId>
         StartDate = startDate;
         EndDate = endDate;
         Capacity = capacity;
+        if (pedagogicalManagerAuthGateUserId.HasValue) PedagogicalManagerAuthGateUserId = pedagogicalManagerAuthGateUserId;
+        if (!string.IsNullOrWhiteSpace(pedagogicalManagerDisplayName)) PedagogicalManagerDisplayName = NormalizeOptional(pedagogicalManagerDisplayName);
         Status = status;
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new CohortUpdatedDomainEvent(Id, OrganizationId));

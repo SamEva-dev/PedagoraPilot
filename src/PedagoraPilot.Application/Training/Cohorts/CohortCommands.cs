@@ -4,7 +4,7 @@ using PedagoraPilot.Contracts.Training;
 using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Application.Training.Cohorts;
-public sealed record CreateCohortCommand(Guid ProgramOfferingId, Guid ReferentialVersionId, string Code, string Name, DateOnly StartDate, DateOnly EndDate, int Capacity, string? ExternalKey) : ICommand<CohortDto>;
+public sealed record CreateCohortCommand(Guid ProgramOfferingId, Guid ReferentialVersionId, string Code, string Name, DateOnly StartDate, DateOnly EndDate, int Capacity, Guid? PedagogicalManagerAuthGateUserId, string? PedagogicalManagerDisplayName, string? ExternalKey) : ICommand<CohortDto>;
 public sealed record UpdateCohortCommand(CohortId Id, string Name, DateOnly StartDate, DateOnly EndDate, int Capacity, string Status) : ICommand<CohortDto>;
 public sealed class CreateCohortCommandValidator : AbstractValidator<CreateCohortCommand>
 {

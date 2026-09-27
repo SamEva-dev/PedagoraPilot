@@ -12,3 +12,5 @@ public sealed record CertificationEligibilityEvaluatedDomainEvent(CertificationC
 public sealed record CertificationAssessmentRecordedDomainEvent(CertificationCandidateId CandidateId, Guid OrganizationId, CertificationAssessmentId AssessmentId, CertificationStepDefinitionId StepId) : DomainEvent;
 public sealed record CertificationDecisionRecordedDomainEvent(CertificationCandidateId CandidateId, Guid OrganizationId, CertificationDecision Decision) : DomainEvent;
 public sealed record CertificationResultsPublishedDomainEvent(CertificationExamSessionId SessionId, Guid OrganizationId, CohortId CohortId) : DomainEvent;
+
+public sealed record JuryAssignmentCreatedDomainEvent(JuryAssignmentId AssignmentId, Guid OrganizationId, CertificationExamSessionId SessionId, Guid AuthGateUserId) : DomainEvent;

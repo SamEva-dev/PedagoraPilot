@@ -31,6 +31,8 @@ public sealed record CohortReadModel
     public DateOnly StartDate { get; init; }
     public DateOnly EndDate { get; init; }
     public int Capacity { get; init; }
+    public Guid? PedagogicalManagerAuthGateUserId { get; init; }
+    public string? PedagogicalManagerDisplayName { get; init; }
     public CohortStatus Status { get; init; }
     public string? ExternalKey { get; init; }
 }

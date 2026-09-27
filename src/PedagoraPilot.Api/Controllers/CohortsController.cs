@@ -17,7 +17,7 @@ public sealed class CohortsController(IMediator mediator) : ControllerBase
     [HttpPost, HasPermission(PedagoraPilotPermissionCodes.Cohorts.Manage)]
     public async Task<ActionResult<CohortDto>> Create(CreateCohortRequest request, CancellationToken ct)
     {
-        var result = await mediator.Send(new CreateCohortCommand(request.ProgramOfferingId, request.ReferentialVersionId, request.Code, request.Name, request.StartDate, request.EndDate, request.Capacity, request.ExternalKey), ct);
+        var result = await mediator.Send(new CreateCohortCommand(request.ProgramOfferingId, request.ReferentialVersionId, request.Code, request.Name, request.StartDate, request.EndDate, request.Capacity, request.PedagogicalManagerAuthGateUserId, request.PedagogicalManagerDisplayName, request.ExternalKey), ct);
         return Created($"/api/v1/cohorts/{result.Id}", result);
     }
 

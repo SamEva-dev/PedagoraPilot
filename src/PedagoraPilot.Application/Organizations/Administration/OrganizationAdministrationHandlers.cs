@@ -57,7 +57,17 @@ public sealed class GetOrganizationAdministrationQueryHandler(
         x.RemoteWorkApprovalRequired,
         x.RemoteWorkMaxDaysPerWeek,
         x.RemoteWorkHalfDayAllowed,
-        x.RemoteWorkEndOfDayReport);
+        x.RemoteWorkEndOfDayReport,
+        x.VerificationStatus.ToString(),
+        x.VerificationSubmittedAtUtc,
+        x.VerifiedAtUtc,
+        x.VerificationComment ?? string.Empty,
+        x.OnboardingCompletedAtUtc.HasValue,
+        x.OnboardingCompletedAtUtc,
+        x.SubscriptionPlan ?? string.Empty,
+        x.SubscriptionStatus.ToString(),
+        x.TrialEndsAtUtc,
+        x.BillingCustomerReference ?? string.Empty);
 }
 
 public sealed class UpdateOrganizationAdministrationCommandHandler(
@@ -82,6 +92,69 @@ public sealed class UpdateOrganizationAdministrationCommandHandler(
             r.Language, r.Timezone, r.DateFormat, r.AcademicYear,
             r.RemoteWorkEnabled, r.RemoteWorkApprovalRequired, r.RemoteWorkMaxDaysPerWeek,
             r.RemoteWorkHalfDayAllowed, r.RemoteWorkEndOfDayReport);
+        return GetOrganizationAdministrationQueryHandler.Map(organization);
+    }
+}
+
+
+public sealed class SubmitOrganizationVerificationCommandHandler(
+    IOrganizationRepository organizations, ICurrentUser current)
+    : IRequestHandler<SubmitOrganizationVerificationCommand, OrganizationAdministrationDto>
+{
+    public async Task<OrganizationAdministrationDto> Handle(SubmitOrganizationVerificationCommand command, CancellationToken ct)
+    {
+        TenantScope.Ensure(current, command.OrganizationId);
+        if (current.HasContextualScopeRestrictions) throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        var organization = await organizations.GetByIdAsync(command.OrganizationId, true, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
+        organization.SubmitVerification();
+        return GetOrganizationAdministrationQueryHandler.Map(organization);
+    }
+}
+
+public sealed class CompleteOrganizationOnboardingCommandHandler(
+    IOrganizationRepository organizations, ICurrentUser current)
+    : IRequestHandler<CompleteOrganizationOnboardingCommand, OrganizationAdministrationDto>
+{
+    public async Task<OrganizationAdministrationDto> Handle(CompleteOrganizationOnboardingCommand command, CancellationToken ct)
+    {
+        TenantScope.Ensure(current, command.OrganizationId);
+        if (current.HasContextualScopeRestrictions) throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        var organization = await organizations.GetByIdAsync(command.OrganizationId, true, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
+        organization.CompleteOnboarding();
+        return GetOrganizationAdministrationQueryHandler.Map(organization);
+    }
+}
+
+public sealed class SetOrganizationVerificationStatusCommandHandler(
+    IOrganizationRepository organizations, ICurrentUser current)
+    : IRequestHandler<SetOrganizationVerificationStatusCommand, OrganizationAdministrationDto>
+{
+    public async Task<OrganizationAdministrationDto> Handle(SetOrganizationVerificationStatusCommand command, CancellationToken ct)
+    {
+        if (!current.IsPlatformAdministrator) throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        var organization = await organizations.GetByIdAsync(command.OrganizationId, true, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
+        if (!Enum.TryParse<OrganizationVerificationStatus>(command.Request.Status, true, out var status))
+            throw new ValidationApplicationException("ORGANIZATION_VERIFICATION_STATUS_INVALID");
+        organization.SetVerificationStatus(status, command.Request.Comment);
+        return GetOrganizationAdministrationQueryHandler.Map(organization);
+    }
+}
+
+public sealed class UpdateOrganizationCommercialStateCommandHandler(
+    IOrganizationRepository organizations, ICurrentUser current)
+    : IRequestHandler<UpdateOrganizationCommercialStateCommand, OrganizationAdministrationDto>
+{
+    public async Task<OrganizationAdministrationDto> Handle(UpdateOrganizationCommercialStateCommand command, CancellationToken ct)
+    {
+        if (!current.IsPlatformAdministrator) throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        var organization = await organizations.GetByIdAsync(command.OrganizationId, true, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
+        if (!Enum.TryParse<OrganizationSubscriptionStatus>(command.Request.Status, true, out var status))
+            throw new ValidationApplicationException("ORGANIZATION_SUBSCRIPTION_STATUS_INVALID");
+        organization.SetCommercialState(command.Request.Plan, status, command.Request.TrialEndsAtUtc, command.Request.BillingCustomerReference);
         return GetOrganizationAdministrationQueryHandler.Map(organization);
     }
 }

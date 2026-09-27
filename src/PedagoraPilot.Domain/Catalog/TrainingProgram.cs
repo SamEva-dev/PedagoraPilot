@@ -10,8 +10,9 @@ public sealed class TrainingProgram : AggregateRoot
     {
     }
 
-    private TrainingProgram(Guid id, Guid familyId, ProgramCode code, string name, string descriptionKey, string icon, int durationHours, string? externalKey) : base(id)
+    private TrainingProgram(Guid id, Guid? organizationId, Guid familyId, ProgramCode code, string name, string descriptionKey, string icon, int durationHours, string? externalKey) : base(id)
     {
+        OrganizationId = organizationId;
         FamilyId = familyId;
         Code = code;
         Name = name.Trim();
@@ -24,6 +25,7 @@ public sealed class TrainingProgram : AggregateRoot
         Version = 1;
     }
 
+    public Guid? OrganizationId { get; private set; }
     public Guid FamilyId { get; private set; }
     public ProgramCode Code { get; private set; } = null!;
     public string Name { get; private set; } = string.Empty;
@@ -37,11 +39,11 @@ public sealed class TrainingProgram : AggregateRoot
     public DateTime UpdatedAtUtc { get; private set; }
     public long Version { get; private set; }
 
-    public static TrainingProgram Create(Guid familyId, string code, string name, string descriptionKey, string icon, int durationHours, IEnumerable<string> capabilities, string? externalKey = null)
+    public static TrainingProgram Create(Guid familyId, string code, string name, string descriptionKey, string icon, int durationHours, IEnumerable<string> capabilities, string? externalKey = null, Guid? organizationId = null)
     {
         if (durationHours <= 0)
             throw new DomainException("PROGRAM_DURATION_INVALID");
-        var x = new TrainingProgram(Guid.NewGuid(), familyId, ProgramCode.Create(code), name, descriptionKey, icon, durationHours, externalKey);
+        var x = new TrainingProgram(Guid.NewGuid(), organizationId, familyId, ProgramCode.Create(code), name, descriptionKey, icon, durationHours, externalKey);
         x.ReplaceCapabilities(capabilities);
         x.RaiseDomainEvent(new TrainingProgramCreatedDomainEvent(x.Id));
         return x;

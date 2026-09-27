@@ -5,6 +5,7 @@ using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Application.Common.Errors;
 using PedagoraPilot.Application.Mapping;
+using PedagoraPilot.Application.Training.Learners;
 using PedagoraPilot.Contracts.DistanceLearning;
 using PedagoraPilot.Domain.DistanceLearning;
 using PedagoraPilot.Domain.Identifiers;
@@ -33,7 +34,13 @@ internal static class DlMap
     }
 }
 
-public sealed class GetDistanceLearningSessionsQueryHandler(IDistanceLearningSessionRepository repo, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<GetDistanceLearningSessionsQuery, IReadOnlyCollection<DistanceLearningSessionDto>>
+public sealed class GetDistanceLearningSessionsQueryHandler(
+    IDistanceLearningSessionRepository repo,
+    IEnrollmentRepository enrollments,
+    ILearnerProfileRepository profiles,
+    IPersonRepository people,
+    ICurrentUser current,
+    IObjectMapper mapper) : IRequestHandler<GetDistanceLearningSessionsQuery, IReadOnlyCollection<DistanceLearningSessionDto>>
 {
     public async Task<IReadOnlyCollection<DistanceLearningSessionDto>> Handle(GetDistanceLearningSessionsQuery r, CancellationToken ct)
     {
@@ -43,10 +50,34 @@ public sealed class GetDistanceLearningSessionsQueryHandler(IDistanceLearningSes
             q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
+
+        HashSet<EnrollmentId>? selfEnrollmentIds = null;
+        if (LearnerSelfAccess.Applies(current))
+        {
+            var self = await LearnerSelfAccess.ResolveProfileAsync(profiles, people, current, ct)
+                ?? throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+            selfEnrollmentIds = (await enrollments.Query(false)
+                    .Where(x => x.LearnerProfileId == self.Id)
+                    .Select(x => x.Id)
+                    .ToListAsync(ct))
+                .ToHashSet();
+
+        }
+
         var rows = await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct);
         if (current.HasContextualScopeRestrictions)
             rows = rows.Where(x => current.CanViewCohort(x.SiteId, x.ProgramId, x.CohortId.Value)).ToList();
-        return rows.Select(x => DlMap.Session(x, mapper)).ToArray();
+        if (selfEnrollmentIds is not null)
+            rows = rows.Where(x => x.Participants.Any(p => selfEnrollmentIds.Contains(p.EnrollmentId))).ToList();
+
+        var dtos = rows.Select(x => DlMap.Session(x, mapper));
+        if (selfEnrollmentIds is not null)
+            dtos = dtos.Select(x => x with
+            {
+                Participants = x.Participants.Where(p => selfEnrollmentIds.Contains(new EnrollmentId(p.EnrollmentId))).ToArray()
+            });
+
+        return dtos.ToArray();
     }
 }
 
@@ -113,7 +144,13 @@ public sealed class UpdateDistanceAttendanceCommandHandler(IDistanceLearningSess
     }
 }
 
-public sealed class GetAsyncLearningModulesQueryHandler(IAsyncLearningModuleRepository repo, ICurrentUser current, IObjectMapper mapper) : IRequestHandler<GetAsyncLearningModulesQuery, IReadOnlyCollection<AsyncLearningModuleDto>>
+public sealed class GetAsyncLearningModulesQueryHandler(
+    IAsyncLearningModuleRepository repo,
+    IEnrollmentRepository enrollments,
+    ILearnerProfileRepository profiles,
+    IPersonRepository people,
+    ICurrentUser current,
+    IObjectMapper mapper) : IRequestHandler<GetAsyncLearningModulesQuery, IReadOnlyCollection<AsyncLearningModuleDto>>
 {
     public async Task<IReadOnlyCollection<AsyncLearningModuleDto>> Handle(GetAsyncLearningModulesQuery r, CancellationToken ct)
     {
@@ -123,9 +160,24 @@ public sealed class GetAsyncLearningModulesQueryHandler(IAsyncLearningModuleRepo
             q = q.Where(x => x.OrganizationId == organizationId.Value);
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
+
+        HashSet<CohortId>? selfCohortIds = null;
+        if (LearnerSelfAccess.Applies(current))
+        {
+            var self = await LearnerSelfAccess.ResolveProfileAsync(profiles, people, current, ct)
+                ?? throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+            selfCohortIds = (await enrollments.Query(false)
+                    .Where(x => x.LearnerProfileId == self.Id)
+                    .Select(x => x.CohortId)
+                    .ToListAsync(ct))
+                .ToHashSet();
+        }
+
         var rows = await q.OrderBy(x => x.DueDate).ToListAsync(ct);
         if (current.HasContextualScopeRestrictions)
             rows = rows.Where(x => current.CanViewCohort(x.SiteId, x.ProgramId, x.CohortId.Value)).ToList();
+        if (selfCohortIds is not null)
+            rows = rows.Where(x => selfCohortIds.Contains(x.CohortId)).ToList();
         return rows.Select(x => DlMap.Module(x, mapper)).ToArray();
     }
 }

@@ -35,7 +35,17 @@ public sealed record OrganizationAdministrationDto(
     bool RemoteWorkApprovalRequired,
     int RemoteWorkMaxDaysPerWeek,
     bool RemoteWorkHalfDayAllowed,
-    bool RemoteWorkEndOfDayReport);
+    bool RemoteWorkEndOfDayReport,
+    string VerificationStatus,
+    DateTime? VerificationSubmittedAtUtc,
+    DateTime? VerifiedAtUtc,
+    string VerificationComment,
+    bool OnboardingCompleted,
+    DateTime? OnboardingCompletedAtUtc,
+    string SubscriptionPlan,
+    string SubscriptionStatus,
+    DateTime? TrialEndsAtUtc,
+    string BillingCustomerReference);
 
 public sealed record UpdateOrganizationAdministrationRequest(
     string LegalName,

@@ -31,10 +31,11 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
     {
         var orgQuery = organizations.Query(false);
 
-        // Real AuthGate users are tenant-scoped by the signed org_id claim.
-        // Platform users have no organization claim and keep cross-tenant visibility.
-        if (currentUser.OrganizationId is Guid organizationId)
-            orgQuery = orgQuery.Where(x => x.Id == organizationId);
+        // Fail closed: every non-platform caller must carry a signed organization claim.
+        // Only a platform administrator is allowed to bootstrap across tenants.
+        var scopedOrganizationId = TenantScope.Organization(currentUser);
+        if (scopedOrganizationId.HasValue)
+            orgQuery = orgQuery.Where(x => x.Id == scopedOrganizationId.Value);
 
         var orgs = await orgQuery
             .OrderBy(x => x.LegalName)

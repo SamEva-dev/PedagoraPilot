@@ -5,6 +5,7 @@ using DomainRelay.EFCore.Outbox;
 using Itech.Emailing.Abstractions;
 using PedagoraPilot.Application.Common.Realtime;
 using PedagoraPilot.Infrastructure.Outbox;
+using PedagoraPilot.Application.Access.Invitations;
 
 namespace PedagoraPilot.Api.Hubs;
 /// <summary>
@@ -17,10 +18,12 @@ public sealed class SignalROutboxTransport : IRealtimeOutboxTransport
     private readonly IMediator _mediator;
     private readonly IEmailingService _emailing;
     private readonly ILogger<SignalROutboxTransport> _logger;
-    public SignalROutboxTransport(IMediator mediator, IEmailingService emailing, ILogger<SignalROutboxTransport> logger)
+    private readonly IAccessInvitationProcessor _accessInvitations;
+    public SignalROutboxTransport(IMediator mediator, IEmailingService emailing, IAccessInvitationProcessor accessInvitations, ILogger<SignalROutboxTransport> logger)
     {
         _mediator = mediator;
         _emailing = emailing;
+        _accessInvitations = accessInvitations;
         _logger = logger;
     }
 
@@ -28,6 +31,14 @@ public sealed class SignalROutboxTransport : IRealtimeOutboxTransport
     {
         using var document = JsonDocument.Parse(envelope.PayloadJson);
         var root = document.RootElement;
+        if (string.Equals(envelope.TypeKey, "pedagora.access.invitation.created.v1", StringComparison.Ordinal))
+        {
+            var invitationId = TryReadStrongGuid(root, "InvitationId", "invitationId");
+            var token = TryReadString(root, "Token", "token");
+            if (!invitationId.HasValue || string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("Invalid access invitation outbox payload.");
+            await _accessInvitations.ProcessCreatedAsync(invitationId.Value, token, cancellationToken);
+        }
         var organizationId = TryReadGuid(root, "OrganizationId", "organizationId");
         if (organizationId.HasValue)
         {
@@ -68,6 +79,21 @@ public sealed class SignalROutboxTransport : IRealtimeOutboxTransport
                 return id;
         }
 
+        return null;
+    }
+
+    private static Guid? TryReadStrongGuid(JsonElement root, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!root.TryGetProperty(name, out var value)) continue;
+            if (value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var direct)) return direct;
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var childName in new[] { "Value", "value" })
+                    if (value.TryGetProperty(childName, out var child) && child.ValueKind == JsonValueKind.String && Guid.TryParse(child.GetString(), out var nested)) return nested;
+            }
+        }
         return null;
     }
 

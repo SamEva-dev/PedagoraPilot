@@ -18,6 +18,8 @@ public sealed class CohortConfiguration : IEntityTypeConfiguration<Cohort>
         b.Property(x => x.ReferentialVersionId).IsRequired();
         b.Property(x => x.Code).HasMaxLength(64).IsRequired();
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        b.Property(x => x.PedagogicalManagerAuthGateUserId);
+        b.Property(x => x.PedagogicalManagerDisplayName).HasMaxLength(220);
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
         b.Property(x => x.ExternalKey).HasMaxLength(100);
         b.Property(x => x.CreatedAtUtc).IsRequired();

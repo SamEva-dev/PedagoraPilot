@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PedagoraPilot.Api.Authorization;
 using PedagoraPilot.Application.Organizations.Provision;
+using PedagoraPilot.Application.Access.Members;
 using PedagoraPilot.Application.Organizations.Queries;
 using PedagoraPilot.Contracts.Provisioning;
 
@@ -19,6 +20,19 @@ public sealed class ProvisioningController : ControllerBase
     public async Task<ActionResult<ProvisionOrganizationResponse>> Provision([FromBody] ProvisionOrganizationRequest request, CancellationToken cancellationToken)
     {
         var response = await _mediator.Send(new ProvisionOrganizationCommand(request.ExternalUserId, request.LegalName, request.CountryCode, request.Owner.FirstName, request.Owner.LastName, request.Owner.Email, request.Owner.Phone), cancellationToken);
+        return Ok(response);
+    }
+
+    [HttpPost("{organizationId:guid}/members")]
+    [ProducesResponseType(typeof(ProvisionOrganizationMemberResponse), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ProvisionOrganizationMemberResponse>> ProvisionMember(
+        Guid organizationId,
+        [FromBody] ProvisionOrganizationMemberRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (organizationId != request.OrganizationId) return BadRequest(new { error = "organization_mismatch" });
+        var response = await _mediator.Send(new SyncOrganizationMemberCommand(
+            request.OrganizationId, request.AuthGateUserId, request.Email, request.FirstName, request.LastName, request.Roles, request.Active), cancellationToken);
         return Ok(response);
     }
 

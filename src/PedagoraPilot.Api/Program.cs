@@ -14,6 +14,7 @@ using PedagoraPilot.Application.Abstractions.Audit;
 using PedagoraPilot.Application.Common.Realtime;
 using PedagoraPilot.Infrastructure;
 using PedagoraPilot.Infrastructure.Outbox;
+using PedagoraPilot.Infrastructure.Persistence.Seeding;
 using Serilog;
 using Serilog.Events;
 
@@ -24,6 +25,10 @@ try
     ConfigureSerilogFilePaths(builder);
     builder.Host.UseSerilog((context, services, configuration) => configuration.ReadFrom.Configuration(context.Configuration).ReadFrom.Services(services).Enrich.FromLogContext());
     builder.Services.AddControllers();
+    builder.Services.AddHttpClient("AuthGateAccess", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    });
     builder.Services.AddOptions<ProductionReadinessOptions>().Bind(builder.Configuration.GetSection(ProductionReadinessOptions.SectionName)).ValidateOnStart();
     builder.Services.AddSingleton<IValidateOptions<ProductionReadinessOptions>, ProductionReadinessValidator>();
     builder.Services.AddHostedService<ProductionReadinessHostedService>();
@@ -54,6 +59,7 @@ try
     var app = builder.Build();
 
     MigrationManager.ApplyMigrations(app);
+    await CatalogReferenceDataSeeder.SeedAsync(app.Services);
 
     app.UseForwardedHeaders(new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto });
     app.UseMiddleware<CorrelationIdMiddleware>();

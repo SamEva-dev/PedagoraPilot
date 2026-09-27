@@ -29,7 +29,7 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
             throw new ConflictApplicationException(ErrorKeys.CohortReferentialProgramMismatch);
         if (await cohorts.CodeExistsAsync(site.OrganizationId, request.Code, null, ct))
             throw new ConflictApplicationException(ErrorKeys.CohortCodeAlreadyExists);
-        var cohort = Cohort.Create(site.OrganizationId, site.Id, offering.Id, referentialVersion.Id, request.Code, request.Name, request.StartDate, request.EndDate, request.Capacity, request.ExternalKey);
+        var cohort = Cohort.Create(site.OrganizationId, site.Id, offering.Id, referentialVersion.Id, request.Code, request.Name, request.StartDate, request.EndDate, request.Capacity, request.PedagogicalManagerAuthGateUserId, request.PedagogicalManagerDisplayName, request.ExternalKey);
         await cohorts.AddAsync(cohort, ct);
         return ToDto(cohort, 0, mapper);
     }
@@ -37,7 +37,7 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
     internal static CohortDto ToDto(Cohort cohort, int learnerCount, IObjectMapper mapper)
     {
         var model = mapper.Map<Cohort, CohortReadModel>(cohort);
-        return new CohortDto(model.Id.Value, model.ExternalKey ?? model.Id.Value.ToString(), model.OrganizationId, model.SiteId, model.ProgramOfferingId, model.ReferentialVersionId, model.Code, model.Name, model.StartDate, model.EndDate, model.Capacity, learnerCount, model.Status.ToString().ToLowerInvariant());
+        return new CohortDto(model.Id.Value, model.ExternalKey ?? model.Id.Value.ToString(), model.OrganizationId, model.SiteId, model.ProgramOfferingId, model.ReferentialVersionId, model.Code, model.Name, model.StartDate, model.EndDate, model.Capacity, learnerCount, model.PedagogicalManagerAuthGateUserId, model.PedagogicalManagerDisplayName ?? string.Empty, model.Status.ToString().ToLowerInvariant());
     }
 }
 

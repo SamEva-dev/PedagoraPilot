@@ -1,4 +1,5 @@
 using PedagoraPilot.Domain.Common;
+using PedagoraPilot.Domain.Certification.Events;
 using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Domain.Certification;
@@ -33,5 +34,10 @@ public sealed class JuryAssignment : AggregateRoot<JuryAssignmentId>
     public string Role { get; private set; } = string.Empty;
     public DateTimeOffset AssignedAtUtc { get; private set; }
 
-    public static JuryAssignment Create(Guid organizationId, CertificationExamSessionId examSessionId, Guid authGateUserId, string displayName, string role) => new(JuryAssignmentId.New(), organizationId, examSessionId, authGateUserId, displayName, role);
+    public static JuryAssignment Create(Guid organizationId, CertificationExamSessionId examSessionId, Guid authGateUserId, string displayName, string role)
+    {
+        var assignment = new JuryAssignment(JuryAssignmentId.New(), organizationId, examSessionId, authGateUserId, displayName, role);
+        assignment.RaiseDomainEvent(new JuryAssignmentCreatedDomainEvent(assignment.Id, organizationId, examSessionId, authGateUserId));
+        return assignment;
+    }
 }

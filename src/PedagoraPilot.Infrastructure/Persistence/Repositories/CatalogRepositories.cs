@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Domain.Catalog;
+using PedagoraPilot.Domain.Catalog.ValueObjects;
 
 namespace PedagoraPilot.Infrastructure.Persistence.Repositories;
 public sealed class ProgramFamilyRepository(PedagoraPilotDbContext db) : Repository<ProgramFamily>(db), IProgramFamilyRepository
@@ -10,8 +11,23 @@ public sealed class ProgramFamilyRepository(PedagoraPilotDbContext db) : Reposit
 
 public sealed class TrainingProgramRepository(PedagoraPilotDbContext db) : Repository<TrainingProgram>(db), ITrainingProgramRepository
 {
-    public Task<TrainingProgram?> GetByCodeAsync(string code, bool isTracking = false, CancellationToken ct = default) => Query(isTracking).SingleOrDefaultAsync(x => x.Code.Value == code.Trim().ToUpperInvariant(), ct);
-    public Task<bool> CodeExistsAsync(string code, Guid? exceptId = null, CancellationToken ct = default) => Query(false).AnyAsync(x => x.Code.Value == code.Trim().ToUpperInvariant() && (!exceptId.HasValue || x.Id != exceptId.Value), ct);
+    public Task<TrainingProgram?> GetByCodeAsync(string code, Guid? organizationId = null, bool isTracking = false, CancellationToken ct = default)
+    {
+        var normalizedCode = ProgramCode.Create(code);
+        return Query(isTracking).SingleOrDefaultAsync(
+            x => x.OrganizationId == organizationId && x.Code == normalizedCode,
+            ct);
+    }
+
+    public Task<bool> CodeExistsAsync(Guid? organizationId, string code, Guid? exceptId = null, CancellationToken ct = default)
+    {
+        var normalizedCode = ProgramCode.Create(code);
+        return Query(false).AnyAsync(
+            x => x.OrganizationId == organizationId
+                 && x.Code == normalizedCode
+                 && (!exceptId.HasValue || x.Id != exceptId.Value),
+            ct);
+    }
     public async Task<IReadOnlyDictionary<Guid, IReadOnlyCollection<string>>> GetCapabilitiesAsync(IEnumerable<Guid> programIds, CancellationToken ct = default)
     {
         var ids = programIds.Distinct().ToArray();

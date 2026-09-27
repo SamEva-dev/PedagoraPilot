@@ -26,16 +26,19 @@ public sealed class TrainingProgramConfiguration : IEntityTypeConfiguration<Trai
     {
         b.ToTable("training_programs", SchemaNames.Catalog);
         b.HasKey(x => x.Id);
+        b.Property(x => x.OrganizationId).HasColumnName("organization_id");
         b.Property(x => x.Code).HasConversion(x => x.Value, x => PedagoraPilot.Domain.Catalog.ValueObjects.ProgramCode.Create(x)).HasColumnName("code").HasMaxLength(64);
-        b.HasIndex(x => x.Code).IsUnique();
+        b.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique();
+        b.HasIndex(x => x.Code).IsUnique().HasFilter("\"organization_id\" IS NULL");
         b.Property(x => x.FamilyId).HasColumnName("family_id");
         b.Property(x => x.Name).HasColumnName("name").HasMaxLength(220);
-        b.Property(x => x.DescriptionKey).HasColumnName("description_key").HasMaxLength(220);
+        b.Property(x => x.DescriptionKey).HasColumnName("description_key").HasColumnType("text");
         b.Property(x => x.Icon).HasColumnName("icon").HasMaxLength(80);
         b.Property(x => x.DurationHours).HasColumnName("duration_hours");
         b.Property(x => x.Status).HasConversion<string>().HasColumnName("status").HasMaxLength(32);
         b.Property(x => x.ExternalKey).HasColumnName("external_key").HasMaxLength(120);
-        b.HasIndex(x => x.ExternalKey).IsUnique();
+        b.HasIndex(x => new { x.OrganizationId, x.ExternalKey }).IsUnique();
+        b.HasIndex(x => x.ExternalKey).IsUnique().HasFilter("\"organization_id\" IS NULL AND \"external_key\" IS NOT NULL");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();

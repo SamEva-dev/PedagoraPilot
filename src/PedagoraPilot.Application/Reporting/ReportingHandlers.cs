@@ -118,10 +118,25 @@ public sealed class GetMyLearnerDashboardHandler(
 }
 
 
-public sealed class GetLearnerDetailHandler(IReportingReadRepository reports, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<GetLearnerDetailQuery, LearnerDetailReportDto>
+public sealed class GetLearnerDetailHandler(
+    IReportingReadRepository reports,
+    ICohortRepository cohorts,
+    IProgramOfferingRepository offerings,
+    ILearnerProfileRepository profiles,
+    IPersonRepository people,
+    ICurrentUser current) : IRequestHandler<GetLearnerDetailQuery, LearnerDetailReportDto>
 {
     public async Task<LearnerDetailReportDto> Handle(GetLearnerDetailQuery q, CancellationToken ct)
     {
+        if (PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(current))
+        {
+            var self = await PedagoraPilot.Application.Training.Learners.LearnerSelfAccess
+                .ResolveProfileAsync(profiles, people, current, ct)
+                ?? throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+            if (self.Id.Value != q.LearnerProfileId)
+                throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        }
+
         var result = await reports.GetLearnerDetailAsync(q.LearnerProfileId, ReportingScope.Organization(current), q.CohortId, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
         await ReportingScope.EnsureCohortAsync(result.CohortId, cohorts, offerings, current, ct);

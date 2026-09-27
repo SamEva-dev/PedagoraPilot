@@ -6,7 +6,9 @@ using Xunit;
 namespace PedagoraPilot.Domain.UnitTests;
 public sealed class CohortTests
 {
-    private static Cohort CreateValid() => Cohort.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "ECSR-2026", "TP ECSR 2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 2, 28), 20);
+    private static Cohort CreateValid() => Cohort.Create(Guid.NewGuid(), Guid.NewGuid(), 
+        Guid.NewGuid(), Guid.NewGuid(), "ECSR-2026", "TP ECSR 2026", 
+        new DateOnly(2026, 9, 1), new DateOnly(2027, 2, 28), 20, Guid.NewGuid(), "");
     [Fact]
     public void Create_raises_domain_event_and_assigns_strong_identifier()
     {
@@ -19,7 +21,8 @@ public sealed class CohortTests
     [Fact]
     public void Create_rejects_invalid_date_range()
     {
-        var act = () => Cohort.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "ECSR", "ECSR", new DateOnly(2026, 9, 2), new DateOnly(2026, 9, 1), 20);
+        var act = () => Cohort.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "ECSR", "ECSR", 
+            new DateOnly(2026, 9, 2), new DateOnly(2026, 9, 1), 20, Guid.NewGuid(), "");
         act.Should().Throw<DomainException>().Which.ErrorKey.Should().Be("COHORT_DATE_RANGE_INVALID");
     }
 
@@ -28,7 +31,8 @@ public sealed class CohortTests
     [InlineData(501)]
     public void Create_rejects_invalid_capacity(int capacity)
     {
-        var act = () => Cohort.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "ECSR", "ECSR", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 1), capacity);
+        var act = () => Cohort.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "ECSR", "ECSR", 
+            new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 1), capacity, Guid.NewGuid(), "");
         act.Should().Throw<DomainException>().Which.ErrorKey.Should().Be("COHORT_CAPACITY_INVALID");
     }
 

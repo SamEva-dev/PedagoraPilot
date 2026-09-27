@@ -60,7 +60,7 @@ public sealed class DistanceLearningSession : AggregateRoot<DistanceLearningSess
     public static DistanceLearningSession Create(Guid organizationId, Guid siteId, Guid programId, CohortId cohortId, string title, string trainerDisplayName, string? trainerEmail, DateTimeOffset startsAtUtc, DateTimeOffset endsAtUtc, DistancePlatform platform, string joinUrl, string? objectives)
     {
         var x = new DistanceLearningSession(DistanceLearningSessionId.New(), organizationId, siteId, programId, cohortId, title, trainerDisplayName, trainerEmail, startsAtUtc, endsAtUtc, platform, joinUrl, objectives);
-        x.RaiseDomainEvent(new DistanceLearningSessionCreatedDomainEvent(x.Id, organizationId, cohortId, x.TrainerEmail));
+        x.RaiseDomainEvent(new DistanceLearningSessionCreatedDomainEvent(x.Id, organizationId, siteId, programId, cohortId, x.TrainerEmail));
         return x;
     }
 
@@ -71,6 +71,7 @@ public sealed class DistanceLearningSession : AggregateRoot<DistanceLearningSess
         var participant = new DistanceParticipant(DistanceParticipantId.New(), Id, enrollmentId, displayName);
         _participants.Add(participant);
         UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new DistanceParticipantAddedDomainEvent(Id, participant.Id, OrganizationId, SiteId, ProgramId, CohortId, enrollmentId));
         return participant;
     }
 
@@ -80,7 +81,7 @@ public sealed class DistanceLearningSession : AggregateRoot<DistanceLearningSess
             throw new DomainException("DISTANCE_SESSION_CLOSED");
         Status = status;
         UpdatedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new DistanceLearningSessionStatusChangedDomainEvent(Id, OrganizationId, status));
+        RaiseDomainEvent(new DistanceLearningSessionStatusChangedDomainEvent(Id, OrganizationId, SiteId, ProgramId, CohortId, status));
     }
 
     public void RecordParticipantAttendance(DistanceParticipantId participantId, DistanceAttendanceStatus attendance, DateTimeOffset? connectedAtUtc, DateTimeOffset? disconnectedAtUtc, int connectedMinutes, int participationPercent, int completedActivities, int activityCount)
@@ -88,7 +89,7 @@ public sealed class DistanceLearningSession : AggregateRoot<DistanceLearningSess
         var participant = _participants.SingleOrDefault(x => x.Id == participantId) ?? throw new DomainException("DISTANCE_PARTICIPANT_NOT_FOUND");
         participant.RecordAttendance(attendance, connectedAtUtc, disconnectedAtUtc, connectedMinutes, participationPercent, completedActivities, activityCount);
         UpdatedAtUtc = DateTime.UtcNow;
-        RaiseDomainEvent(new DistanceParticipantAttendanceUpdatedDomainEvent(Id, participantId, OrganizationId, attendance));
+        RaiseDomainEvent(new DistanceParticipantAttendanceUpdatedDomainEvent(Id, participantId, OrganizationId, SiteId, ProgramId, CohortId, attendance));
     }
 
     private static string Req(string? v, string k, int max)

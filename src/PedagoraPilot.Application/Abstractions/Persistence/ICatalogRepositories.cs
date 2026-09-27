@@ -8,8 +8,8 @@ public interface IProgramFamilyRepository : IRepository<ProgramFamily>
 
 public interface ITrainingProgramRepository : IRepository<TrainingProgram>
 {
-    Task<TrainingProgram?> GetByCodeAsync(string code, bool isTracking = false, CancellationToken ct = default);
-    Task<bool> CodeExistsAsync(string code, Guid? exceptId = null, CancellationToken ct = default);
+    Task<TrainingProgram?> GetByCodeAsync(string code, Guid? organizationId = null, bool isTracking = false, CancellationToken ct = default);
+    Task<bool> CodeExistsAsync(Guid? organizationId, string code, Guid? exceptId = null, CancellationToken ct = default);
     Task<IReadOnlyDictionary<Guid, IReadOnlyCollection<string>>> GetCapabilitiesAsync(IEnumerable<Guid> programIds, CancellationToken ct = default);
 }
 

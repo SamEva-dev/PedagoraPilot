@@ -17,12 +17,17 @@ using PedagoraPilot.Domain.Documents.Events;
 using PedagoraPilot.Domain.Certification.Events;
 using PedagoraPilot.Domain.DistanceLearning.Events;
 using PedagoraPilot.Domain.Workforce.Events;
+using PedagoraPilot.Domain.Access.Events;
 using PedagoraPilot.Infrastructure.Storage;
 using PedagoraPilot.Application.Abstractions.Storage;
 using PedagoraPilot.Infrastructure.Persistence;
 using PedagoraPilot.Infrastructure.Persistence.Idempotency;
 using PedagoraPilot.Infrastructure.Persistence.Repositories;
 using PedagoraPilot.Infrastructure.Outbox;
+using PedagoraPilot.Infrastructure.Identity;
+using PedagoraPilot.Application.Abstractions.Identity;
+using PedagoraPilot.Application.Access.Invitations;
+using PedagoraPilot.Infrastructure.Access;
 
 namespace PedagoraPilot.Infrastructure;
 
@@ -91,14 +96,19 @@ public static class DependencyInjection
                 registry.Register<CertificationAssessmentRecordedDomainEvent>("pedagora.certification.assessment.recorded.v1");
                 registry.Register<CertificationDecisionRecordedDomainEvent>("pedagora.certification.decision.recorded.v1");
                 registry.Register<CertificationResultsPublishedDomainEvent>("pedagora.certification.results.published.v1");
+                registry.Register<JuryAssignmentCreatedDomainEvent>("pedagora.certification.jury-assignment.created.v1");
                 registry.Register<DistanceLearningSessionCreatedDomainEvent>("pedagora.distance.session.created.v1");
                 registry.Register<DistanceLearningSessionStatusChangedDomainEvent>("pedagora.distance.session.status-changed.v1");
+                registry.Register<DistanceParticipantAddedDomainEvent>("pedagora.distance.participant.added.v1");
                 registry.Register<DistanceParticipantAttendanceUpdatedDomainEvent>("pedagora.distance.participant.attendance-updated.v1");
                 registry.Register<AsyncLearningModuleCreatedDomainEvent>("pedagora.distance.module.created.v1");
                 registry.Register<AsyncLearningModuleProgressChangedDomainEvent>("pedagora.distance.module.progress-changed.v1");
                 registry.Register<RemoteWorkRequestedDomainEvent>("pedagora.workforce.remote-work.requested.v1");
                 registry.Register<RemoteWorkDecisionRecordedDomainEvent>("pedagora.workforce.remote-work.decision-recorded.v1");
                 registry.Register<RemoteWorkActivityUpdatedDomainEvent>("pedagora.workforce.remote-work.activity-updated.v1");
+                registry.Register<AccessInvitationCreatedDomainEvent>("pedagora.access.invitation.created.v1");
+                registry.Register<AccessInvitationAcceptedDomainEvent>("pedagora.access.invitation.accepted.v1");
+                registry.Register<AccessMemberRoleChangedDomainEvent>("pedagora.access.member.role-changed.v1");
             });
         });
         // Preserve the outbox's option callbacks while matching the singleton factory lifetime.
@@ -113,6 +123,10 @@ public static class DependencyInjection
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IOrganizationRepository, OrganizationRepository>();
+        services.AddScoped<IOrganizationMemberRepository, OrganizationMemberRepository>();
+        services.AddScoped<IAccessInvitationRepository, AccessInvitationRepository>();
+        services.AddScoped<IApplicationIdentityAccess, AuthGateApplicationIdentityAccess>();
+        services.AddScoped<IAccessInvitationProcessor, AccessInvitationProcessor>();
         services.AddScoped<ITrainingSiteRepository, TrainingSiteRepository>();
         services.AddScoped<IProgramFamilyRepository, ProgramFamilyRepository>();
         services.AddScoped<ITrainingProgramRepository, TrainingProgramRepository>();
