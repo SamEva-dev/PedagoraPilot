@@ -1,3 +1,7 @@
+using Amazon;
+using Amazon.S3;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Hosting;
 using DomainRelay.EFCore;
 using DomainRelay.EFCore.Outbox.Abstractions;
 using Itech.Emailing.Registration;
@@ -27,13 +31,15 @@ using PedagoraPilot.Infrastructure.Outbox;
 using PedagoraPilot.Infrastructure.Identity;
 using PedagoraPilot.Application.Abstractions.Identity;
 using PedagoraPilot.Application.Access.Invitations;
+using PedagoraPilot.Application.Access.Members;
+using PedagoraPilot.Application.Access.Assignments;
 using PedagoraPilot.Infrastructure.Access;
 
 namespace PedagoraPilot.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration, IHostEnvironment? environment = null)
     {
         var connectionString = configuration.GetConnectionString("Default") ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
         // The outbox uses a singleton factory, so its context options must also be singleton.
@@ -57,13 +63,17 @@ public static class DependencyInjection
                 registry.Register<OrganizationAdministrationUpdatedDomainEvent>("pedagora.organization.administration.updated.v1");
                 registry.Register<TrainingSiteCreatedDomainEvent>("pedagora.organization.training-site.created.v1");
                 registry.Register<TrainingSiteUpdatedDomainEvent>("pedagora.organization.training-site.updated.v1");
+                registry.Register<TrainingSiteDeletedDomainEvent>("pedagora.organization.training-site.deleted.v1");
                 registry.Register<TrainingProgramCreatedDomainEvent>("pedagora.catalog.program.created.v1");
                 registry.Register<TrainingProgramUpdatedDomainEvent>("pedagora.catalog.program.updated.v1");
+                registry.Register<TrainingProgramDeletedDomainEvent>("pedagora.catalog.program.deleted.v1");
                 registry.Register<ProgramOfferingChangedDomainEvent>("pedagora.catalog.offering.changed.v1");
                 registry.Register<ReferentialVersionCreatedDomainEvent>("pedagora.catalog.referential-version.created.v1");
                 registry.Register<ReferentialVersionPublishedDomainEvent>("pedagora.catalog.referential-version.published.v1");
                 registry.Register<CohortCreatedDomainEvent>("pedagora.training.cohort.created.v1");
                 registry.Register<CohortUpdatedDomainEvent>("pedagora.training.cohort.updated.v1");
+                registry.Register<CohortDeletedDomainEvent>("pedagora.training.cohort.deleted.v1");
+                registry.Register<CohortTrainerAssignmentChangedDomainEvent>("pedagora.training.cohort-trainer-assignment.changed.v1");
                 registry.Register<PersonCreatedDomainEvent>("pedagora.learning.person.created.v1");
                 registry.Register<LearnerProfileCreatedDomainEvent>("pedagora.learning.learner-profile.created.v1");
                 registry.Register<EnrollmentCreatedDomainEvent>("pedagora.training.enrollment.created.v1");
@@ -109,6 +119,8 @@ public static class DependencyInjection
                 registry.Register<AccessInvitationCreatedDomainEvent>("pedagora.access.invitation.created.v1");
                 registry.Register<AccessInvitationAcceptedDomainEvent>("pedagora.access.invitation.accepted.v1");
                 registry.Register<AccessMemberRoleChangedDomainEvent>("pedagora.access.member.role-changed.v1");
+                registry.Register<AccessMemberStatusChangedDomainEvent>("pedagora.access.member.status-changed.v1");
+                registry.Register<AccessMemberRevokedDomainEvent>("pedagora.access.member.revoked.v1");
             });
         });
         // Preserve the outbox's option callbacks while matching the singleton factory lifetime.
@@ -126,6 +138,9 @@ public static class DependencyInjection
         services.AddScoped<IOrganizationMemberRepository, OrganizationMemberRepository>();
         services.AddScoped<IAccessInvitationRepository, AccessInvitationRepository>();
         services.AddScoped<IApplicationIdentityAccess, AuthGateApplicationIdentityAccess>();
+        services.AddScoped<IStudentMemberProvisioner, StudentMemberProvisioner>();
+        services.AddHostedService<StudentMemberProjectionBackfillService>();
+        services.AddHostedService<CohortTrainerAssignmentBackfillService>();
         services.AddScoped<IAccessInvitationProcessor, AccessInvitationProcessor>();
         services.AddScoped<ITrainingSiteRepository, TrainingSiteRepository>();
         services.AddScoped<IProgramFamilyRepository, ProgramFamilyRepository>();
@@ -134,6 +149,8 @@ public static class DependencyInjection
         services.AddScoped<IReferentialRepository, ReferentialRepository>();
         services.AddScoped<IReferentialVersionRepository, ReferentialVersionRepository>();
         services.AddScoped<ICohortRepository, CohortRepository>();
+        services.AddScoped<ICohortTrainerAssignmentRepository, CohortTrainerAssignmentRepository>();
+        services.AddScoped<IUserBusinessAssignmentService, UserBusinessAssignmentService>();
         services.AddScoped<IPersonRepository, PersonRepository>();
         services.AddScoped<ILearnerProfileRepository, LearnerProfileRepository>();
         services.AddScoped<IEnrollmentRepository, EnrollmentRepository>();
@@ -158,9 +175,53 @@ public static class DependencyInjection
         services.AddScoped<IAuditEntryRepository, AuditEntryRepository>();
         services.AddScoped<IReportingReadRepository, ReportingReadRepository>();
         services.Configure<ObjectStorageOptions>(configuration.GetSection(ObjectStorageOptions.SectionName));
+        services.Configure<S3StorageOptions>(configuration.GetSection("Storage:S3"));
+        services.Configure<ClamAvScannerOptions>(configuration.GetSection("Storage:SecurityScanner"));
         services.AddSingleton<IDocumentStoragePolicy, DocumentStoragePolicy>();
-        services.AddSingleton<IObjectStorage, FileSystemObjectStorage>();
-        services.AddSingleton<IFileSecurityScanner, NoOpFileSecurityScanner>();
+        var provider = configuration["Storage:Provider"] ?? "FileSystem";
+        if (provider.Equals("S3", StringComparison.OrdinalIgnoreCase))
+        {
+            var s3 = configuration.GetSection("Storage:S3").Get<S3StorageOptions>() ?? new();
+            if (string.IsNullOrWhiteSpace(s3.Bucket))
+                throw new InvalidOperationException("Storage:S3:Bucket is required for S3 storage.");
+            if (!string.IsNullOrWhiteSpace(s3.ServiceUrl))
+            {
+                if (!Uri.TryCreate(s3.ServiceUrl, UriKind.Absolute, out var endpoint) ||
+                    (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
+                    throw new InvalidOperationException("Storage:S3:ServiceUrl must be an absolute HTTP(S) endpoint.");
+                // Production must never send object data or credentials over plaintext HTTP.
+                if (endpoint.Scheme != Uri.UriSchemeHttps &&
+                    environment?.IsDevelopment() != true)
+                    throw new InvalidOperationException("S3 custom endpoints require HTTPS outside Development.");
+            }
+            services.AddSingleton<IAmazonS3>(_ =>
+            {
+                var config = new AmazonS3Config { ForcePathStyle = s3.ForcePathStyle };
+                if (!string.IsNullOrWhiteSpace(s3.ServiceUrl))
+                {
+                    config.ServiceURL = s3.ServiceUrl;
+                    config.AuthenticationRegion = s3.Region;
+                }
+                else config.RegionEndpoint = RegionEndpoint.GetBySystemName(s3.Region);
+                return new AmazonS3Client(config);
+            });
+            services.AddSingleton<IObjectStorage, S3ObjectStorage>();
+        }
+        else if (provider.Equals("FileSystem", StringComparison.OrdinalIgnoreCase))
+            services.AddSingleton<IObjectStorage, FileSystemObjectStorage>();
+        else throw new InvalidOperationException($"Unsupported Storage:Provider '{provider}'.");
+
+        var scanner = configuration["Storage:SecurityScanner:Provider"] ?? "NoOp";
+        if (scanner.Equals("ClamAV", StringComparison.OrdinalIgnoreCase))
+        {
+            var opts = configuration.GetSection("Storage:SecurityScanner").Get<ClamAvScannerOptions>() ?? new();
+            if (string.IsNullOrWhiteSpace(opts.Host) || opts.Port is < 1 or > 65535 || opts.TimeoutSeconds is < 1 or > 300)
+                throw new InvalidOperationException("Invalid Storage:SecurityScanner ClamAV endpoint/timeout.");
+            services.AddSingleton<IFileSecurityScanner, ClamAvFileSecurityScanner>();
+        }
+        else if (scanner.Equals("NoOp", StringComparison.OrdinalIgnoreCase))
+            services.AddSingleton<IFileSecurityScanner, NoOpFileSecurityScanner>();
+        else throw new InvalidOperationException($"Unsupported Storage:SecurityScanner:Provider '{scanner}'.");
         services.AddScoped<IdempotencyStore>();
         // Itech.Emailing 2.0.1 owns its own EF Core migrations.
         // Keep EmailingDbContext migrations in the Itech.Emailing assembly.

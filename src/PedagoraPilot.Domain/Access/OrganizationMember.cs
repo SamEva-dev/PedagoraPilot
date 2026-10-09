@@ -69,6 +69,20 @@ public sealed class OrganizationMember : AggregateRoot<OrganizationMemberId>
         RaiseDomainEvent(new AccessMemberRoleChangedDomainEvent(OrganizationId, AuthGateUserId, roleCode.Trim()));
     }
 
+    public void RegisterStatusChange(bool active)
+    {
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+        RaiseDomainEvent(new AccessMemberStatusChangedDomainEvent(OrganizationId, AuthGateUserId, active));
+    }
+
+    public void RegisterRevoked()
+    {
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+        RaiseDomainEvent(new AccessMemberRevokedDomainEvent(OrganizationId, AuthGateUserId));
+    }
+
     private static string Normalize(string? value, int max)
     {
         var normalized = (value ?? string.Empty).Trim();

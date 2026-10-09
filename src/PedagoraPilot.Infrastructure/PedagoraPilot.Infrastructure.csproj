@@ -6,8 +6,10 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="DomainRelay.EFCore" />
+    <PackageReference Include="AWSSDK.S3" />
     <PackageReference Include="Itech.Emailing" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

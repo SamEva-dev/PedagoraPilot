@@ -23,7 +23,7 @@ public sealed class AccessScopeController(IMediator mediator) : ControllerBase
     [HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
     public async Task<IActionResult> Validate(ValidateScopeRequest request, CancellationToken ct)
     {
-        var valid = await mediator.Send(new ValidateAccessScopeAssignmentCommand(
+        var valid = await mediator.Send(new ValidateAccessScopeAssignmentQuery(
             request.Scope,
             request.SiteId,
             request.ProgramId,

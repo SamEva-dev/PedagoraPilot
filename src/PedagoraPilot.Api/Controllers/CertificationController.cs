@@ -25,6 +25,9 @@ public sealed class CertificationController(IMediator mediator) : ControllerBase
     [HttpPost("sessions/{id:guid}/plan")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
     public Task<CertificationExamSessionDto> Plan(Guid id, CancellationToken ct) => mediator.Send(new PlanCertificationExamSessionCommand(new CertificationExamSessionId(id)), ct);
+    [HttpPost("sessions/{id:guid}/start")]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
+    public Task<CertificationExamSessionDto> Start(Guid id, CancellationToken ct) => mediator.Send(new StartCertificationExamSessionCommand(new CertificationExamSessionId(id)), ct);
     [HttpPost("sessions/{id:guid}/candidates/from-cohort")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
     public Task<int> RegisterCandidates(Guid id, CancellationToken ct) => mediator.Send(new RegisterCohortCandidatesCommand(new CertificationExamSessionId(id)), ct);
@@ -40,6 +43,10 @@ public sealed class CertificationController(IMediator mediator) : ControllerBase
     [HttpPost("candidates/{id:guid}/assessments")]
     [HasPermission(PedagoraPilotPermissionCodes.Jury.Evaluate)]
     public Task<CertificationCandidateDto> Assessment(Guid id, RecordCertificationAssessmentRequest r, CancellationToken ct) => mediator.Send(new RecordCertificationAssessmentCommand(new CertificationCandidateId(id), new CertificationStepDefinitionId(r.StepDefinitionId), r.JuryDisplayName, r.Outcome, r.Score, r.Comment), ct);
+    [HttpPut("candidates/{id:guid}/assessments/batch")]
+    [HasPermission(PedagoraPilotPermissionCodes.Jury.Evaluate)]
+    public Task<CertificationCandidateDto> AssessmentBatch(Guid id, RecordCertificationAssessmentBatchRequest r, CancellationToken ct) =>
+        mediator.Send(new RecordCertificationAssessmentBatchCommand(new CertificationCandidateId(id), r.Assessments, r.Finalize), ct);
     [HttpPut("candidates/{id:guid}/decision")]
     [HasPermission(PedagoraPilotPermissionCodes.Results.Manage)]
     public Task<CertificationCandidateDto> Decision(Guid id, RecordCertificationDecisionRequest r, CancellationToken ct) => mediator.Send(new RecordCertificationDecisionCommand(new CertificationCandidateId(id), r.Decision, r.Comment), ct);

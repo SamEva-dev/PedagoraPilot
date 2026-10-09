@@ -8,6 +8,7 @@ using PedagoraPilot.Application.Mapping;
 using PedagoraPilot.Contracts.Learning;
 using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Learning;
+using PedagoraPilot.Domain.Training;
 using PedagoraPilot.Domain.Training.Delivery;
 using PedagoraPilot.Application.Training.Learners;
 
@@ -103,6 +104,87 @@ public sealed class GetCompetencyDefinitionsQueryHandler(ICompetencyDefinitionRe
     }
 }
 
+
+public sealed class GetCompetencyDefinitionCatalogQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetCompetencyDefinitionCatalogQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
+{
+    public async Task<IReadOnlyCollection<CompetencyDefinitionDto>> Handle(GetCompetencyDefinitionCatalogQuery r, CancellationToken ct)
+    {
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        return (await definitions.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Definition(x, mapper)).ToArray();
+    }
+}
+
+public sealed class CreateCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<CreateCompetencyDefinitionCommand, CompetencyDefinitionDto>
+{
+    public async Task<CompetencyDefinitionDto> Handle(CreateCompetencyDefinitionCommand r, CancellationToken ct)
+    {
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        var code = (r.Code ?? string.Empty).Trim().ToUpperInvariant();
+        if (await definitions.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Code == code, ct))
+            throw new ConflictApplicationException(ErrorKeys.CompetencyCodeConflict);
+        if (!Enum.TryParse<CompetencyKind>((r.Kind ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out var kind))
+            throw new ValidationApplicationException(ErrorKeys.CompetencyKindInvalid);
+        CompetencyDefinitionId? parentId = null;
+        if (r.ParentId.HasValue)
+        {
+            var parent = await definitions.GetByIdAsync(new CompetencyDefinitionId(r.ParentId.Value), false, ct)
+                ?? throw new ValidationApplicationException(ErrorKeys.CompetencyParentInvalid);
+            if (parent.ReferentialVersionId != r.ReferentialVersionId || parent.ParentId.HasValue)
+                throw new ValidationApplicationException(ErrorKeys.CompetencyParentInvalid);
+            parentId = parent.Id;
+        }
+        var entity = CompetencyDefinition.Create(r.ReferentialVersionId, parentId, code, r.Title, kind, r.SortOrder, r.Active);
+        await definitions.AddAsync(entity, ct);
+        return LearningProgressDtoFactory.Definition(entity, mapper);
+    }
+}
+
+public sealed class UpdateCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<UpdateCompetencyDefinitionCommand, CompetencyDefinitionDto>
+{
+    public async Task<CompetencyDefinitionDto> Handle(UpdateCompetencyDefinitionCommand r, CancellationToken ct)
+    {
+        var entity = await definitions.GetByIdAsync(r.CompetencyDefinitionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
+        if (entity.ReferentialVersionId != r.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        var code = (r.Code ?? string.Empty).Trim().ToUpperInvariant();
+        if (await definitions.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Code == code && x.Id != entity.Id, ct))
+            throw new ConflictApplicationException(ErrorKeys.CompetencyCodeConflict);
+        if (!Enum.TryParse<CompetencyKind>((r.Kind ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out var kind))
+            throw new ValidationApplicationException(ErrorKeys.CompetencyKindInvalid);
+        CompetencyDefinitionId? parentId = null;
+        if (r.ParentId.HasValue)
+        {
+            var requested = new CompetencyDefinitionId(r.ParentId.Value);
+            if (requested == entity.Id)
+                throw new ValidationApplicationException(ErrorKeys.CompetencyParentInvalid);
+            var parent = await definitions.GetByIdAsync(requested, false, ct) ?? throw new ValidationApplicationException(ErrorKeys.CompetencyParentInvalid);
+            if (parent.ReferentialVersionId != r.ReferentialVersionId || parent.ParentId.HasValue)
+                throw new ValidationApplicationException(ErrorKeys.CompetencyParentInvalid);
+            parentId = parent.Id;
+        }
+        entity.Update(parentId, code, r.Title, kind, r.SortOrder, r.Active);
+        return LearningProgressDtoFactory.Definition(entity, mapper);
+    }
+}
+
+public sealed class DeleteCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IDrivingEvaluationRepository driving, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<DeleteCompetencyDefinitionCommand, bool>
+{
+    public async Task<bool> Handle(DeleteCompetencyDefinitionCommand r, CancellationToken ct)
+    {
+        var entity = await definitions.GetByIdAsync(r.CompetencyDefinitionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
+        if (entity.ReferentialVersionId != r.ReferentialVersionId)
+            throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        if (await definitions.Query(false).AnyAsync(x => x.ParentId == entity.Id, ct)
+            || await records.Query(false).AnyAsync(x => x.CompetencyDefinitionId == entity.Id, ct)
+            || await driving.Query(false).AnyAsync(x => x.CompetencyDefinitionId == entity.Id, ct))
+            throw new ConflictApplicationException(ErrorKeys.CompetencyInUse);
+        definitions.Remove(entity);
+        return true;
+    }
+}
+
 public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerCompetenciesQuery, IReadOnlyCollection<LearnerCompetencyDto>>
 {
     public async Task<IReadOnlyCollection<LearnerCompetencyDto>> Handle(GetLearnerCompetenciesQuery r, CancellationToken ct)
@@ -131,8 +213,10 @@ public sealed class EvaluateCompetencyCommandHandler(IEnrollmentRepository enrol
         TenantScope.Ensure(current, enrollment.OrganizationId);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         await ContextualScope.EnsureCanManageCohortAsync(current, cohort, offerings, ct);
+        if (enrollment.Status != EnrollmentStatus.Active)
+            throw new ConflictApplicationException(ErrorKeys.CompetencyEnrollmentNotActive);
         var definition = await definitions.GetByIdAsync(r.CompetencyDefinitionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
-        if (definition.ReferentialVersionId != cohort.ReferentialVersionId)
+        if (definition.ReferentialVersionId != cohort.ReferentialVersionId || !definition.Active)
             throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
         if (!LearningProgressDtoFactory.TryParseLevel(r.Level, out var level))
             throw new ValidationApplicationException(ErrorKeys.CompetencyLevelInvalid);
@@ -181,6 +265,117 @@ public sealed class CreatePedagogicalTopicCommandHandler(IPedagogicalTopicReposi
         var entity = PedagogicalTopic.Create(r.ReferentialVersionId, code, r.Number, r.Title, r.Category, r.DurationMinutes, r.Reference, r.Active, null, r.Objective, r.Example, r.Correction);
         await topics.AddAsync(entity, ct);
         return LearningProgressDtoFactory.Topic(entity, mapper);
+    }
+}
+
+public sealed class ImportTpEcsr58TopicsCommandHandler(
+    IPedagogicalTopicRepository topics,
+    IObjectMapper mapper,
+    ICurrentUser current,
+    IReferentialVersionRepository versions,
+    IReferentialRepository referentials,
+    IProgramOfferingRepository offerings,
+    ITrainingSiteRepository sites) : IRequestHandler<ImportTpEcsr58TopicsCommand, IReadOnlyCollection<PedagogicalTopicDto>>
+{
+    private sealed record SeedTopic(int Number, string Title, string Category);
+
+    private static readonly SeedTopic[] Catalog =
+    {
+        new(1, "Le continuum éducatif. Formation obligatoire et facultative", "pedagogy"),
+        new(2, "Le permis de conduire : catégorie B, définition, condition d’obtention, période probatoire", "rules"),
+        new(3, "Permis de conduire : sanctions administratives et pénales", "rules"),
+        new(4, "Le permis à points, son rôle, son fonctionnement", "rules"),
+        new(5, "Les documents et équipements obligatoires et facultatifs du conducteur", "rules"),
+        new(6, "L’assurance automobile : le rôle de l’assurance. Assurance obligatoire et facultative", "rules"),
+        new(7, "L’assurance automobile : le constat à l’amiable", "rules"),
+        new(8, "Le risque routier chez les jeunes entre 18 et 24 ans", "risk"),
+        new(9, "L’âge et la conduite : classe d’âge, sexe et risques", "risk"),
+        new(10, "Pressions et influences incitant à une vitesse inadaptée", "risk"),
+        new(11, "L’alcool : effets et accidentologie", "risk"),
+        new(12, "L’alcool : le cadre réglementaire", "rules"),
+        new(13, "Alcool : diffusion et élimination", "risk"),
+        new(14, "Estimation du taux d’alcoolémie", "risk"),
+        new(15, "Les substances psychoactives (sauf l’alcool)", "risk"),
+        new(16, "L’attention du conducteur : vigilance, attention et fatigue", "risk"),
+        new(17, "La vue du conducteur : fonctionnement de l’œil (acuité visuelle, champ visuel, tache de Mariotte, …), réglementation", "risk"),
+        new(18, "Les systèmes de retenue : rôle, réglementation, accidentologie, installations des passagers", "vehicle"),
+        new(19, "L’utilisation rationnelle du véhicule (aspect mécanique)", "vehicle"),
+        new(20, "L’éco conduite", "mobility"),
+        new(21, "Le temps de réaction et distances de sécurité", "risk"),
+        new(22, "Les dispositifs de sécurité active : fonctions et effets pervers", "vehicle"),
+        new(23, "Aides et assistances à la conduite : définitions, rôles et homéostasie du risque", "vehicle"),
+        new(24, "Les vérifications de sécurité du véhicule", "vehicle"),
+        new(25, "Feux obligatoires et facultatifs des véhicules", "vehicle"),
+        new(26, "Les surfaces vitrées et les rétroviseurs : descriptions, leurs usages, l’entretien", "vehicle"),
+        new(27, "Lois physiques appliquées aux véhicules : identification et conséquences", "vehicle"),
+        new(28, "Le transport d’une charge en sécurité à l’aide du véhicule", "vehicle"),
+        new(29, "Les pneumatiques : adhérence, entretien et réglementation", "vehicle"),
+        new(30, "Les ensembles de véhicule de la catégorie B : réglementation, signalisation et comportement", "vehicle"),
+        new(31, "La signalisation verticale", "rules"),
+        new(32, "La signalisation horizontale", "rules"),
+        new(33, "Les intersections gérées par une signalisation lumineuse", "rules"),
+        new(34, "Les intersections non gérées par une signalisation lumineuse", "rules"),
+        new(35, "Les ronds-points et les sens giratoires", "rules"),
+        new(36, "Les passages à niveaux", "rules"),
+        new(37, "Stationnement, arrêt, immobilisation", "rules"),
+        new(38, "Les voies réservées", "rules"),
+        new(39, "Les croisements", "rules"),
+        new(40, "Les dépassements", "rules"),
+        new(41, "Vitesse : la réglementation et les sanctions", "rules"),
+        new(42, "Vitesse : la signalisation et son rôle", "rules"),
+        new(43, "Les distances d’arrêt", "risk"),
+        new(44, "Les usagers vulnérables", "mobility"),
+        new(45, "Le partage social de la route avec les piétons", "mobility"),
+        new(46, "Le partage social avec les 2 roues et L5e", "mobility"),
+        new(47, "Le partage social avec les véhicules du groupe lourd", "mobility"),
+        new(48, "Véhicules d’intérêt général", "rules"),
+        new(49, "La fonction sociale de la réglementation en matière de S.R.", "pedagogy"),
+        new(50, "La communication entre les usagers de la route", "mobility"),
+        new(51, "Conduite et préparation d’un voyage", "mobility"),
+        new(52, "Circulation en hiver", "risk"),
+        new(53, "Les risques à la conduite par intempéries", "risk"),
+        new(54, "Les risques à la conduite de nuit", "risk"),
+        new(55, "L’autoroute", "rules"),
+        new(56, "Approche factorielle de l’accident, système HEVO", "risk"),
+        new(57, "Le comportement en cas d’accident corporel et matériel", "rules"),
+        new(58, "Les justifications des politiques de S.R.", "pedagogy"),
+    };
+
+    public async Task<IReadOnlyCollection<PedagogicalTopicDto>> Handle(ImportTpEcsr58TopicsCommand r, CancellationToken ct)
+    {
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+
+        var existingNumbers = (await topics.Query(false)
+            .Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Number.HasValue)
+            .Select(x => x.Number!.Value)
+            .ToListAsync(ct))
+            .ToHashSet();
+
+        foreach (var seed in Catalog.Where(x => !existingNumbers.Contains(x.Number)))
+        {
+            var entity = PedagogicalTopic.Create(
+                r.ReferentialVersionId,
+                $"SHEET-{seed.Number:D3}",
+                seed.Number,
+                seed.Title,
+                seed.Category,
+                20,
+                "Liste officielle des 58 fiches pédagogiques TP ECSR",
+                true,
+                null,
+                null,
+                null,
+                null);
+            await topics.AddAsync(entity, ct);
+        }
+
+        return (await topics.Query(false)
+            .Where(x => x.ReferentialVersionId == r.ReferentialVersionId)
+            .OrderBy(x => x.Number)
+            .ThenBy(x => x.Code)
+            .ToListAsync(ct))
+            .Select(x => LearningProgressDtoFactory.Topic(x, mapper))
+            .ToArray();
     }
 }
 
@@ -316,11 +511,20 @@ public sealed class GetDrivingEvaluationsQueryHandler(IDrivingEvaluationReposito
         await LearnerSelfAccess.EnsureAsync(enrollment, profiles, people, current, ct);
         var cohort = await cohorts.GetByIdAsync(enrollment.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         await ContextualScope.EnsureCanViewCohortAsync(current, cohort, offerings, ct);
-        return (await evaluations.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).Include(x => x.Criteria).OrderByDescending(x => x.EvaluatedAtUtc).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Driving(x, mapper)).ToArray();
+        var query = evaluations.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId);
+        if (current.Roles.Contains("PedagoraPilot.Trainer")
+            && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Driving.ViewOthers))
+        {
+            var ownTrainerId = current.UserId?.ToString("D");
+            if (string.IsNullOrWhiteSpace(ownTrainerId)) return Array.Empty<DrivingEvaluationDto>();
+            query = query.Where(x => x.TrainerAuthGateUserId == ownTrainerId);
+        }
+        return (await query.Include(x => x.Criteria).OrderByDescending(x => x.EvaluatedAtUtc).ToListAsync(ct))
+            .Select(x => LearningProgressDtoFactory.Driving(x, mapper)).ToArray();
     }
 }
 
-public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
+public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, IOrganizationMemberRepository members, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
 {
     public async Task<DrivingEvaluationDto> Handle(RecordDrivingEvaluationCommand r, CancellationToken ct)
     {
@@ -363,11 +567,13 @@ public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository 
             criteria.Add((criterion.Code, criterion.Title, level));
         }
 
-        var trainerName = current.DisplayName ?? current.Email ?? current.UserId?.ToString("D");
-        if (string.IsNullOrWhiteSpace(trainerName))
+        var trainer = await PedagoraPilot.Application.Training.Delivery.CreateTrainingSessionCommandHandler.VerifiedTrainerAsync(
+            current, r.TrainerAuthGateUserId, r.TrainerDisplayName, members, enrollment.OrganizationId,
+            PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Driving.AssignTrainer, ct);
+        if (string.IsNullOrWhiteSpace(trainer.Name))
             throw new ValidationApplicationException(ErrorKeys.DrivingTrainerRequired);
         var entity = DrivingEvaluation.Create(enrollment.OrganizationId, enrollment.Id, definition.Id, r.TrainingSessionId,
-            DateTimeOffset.UtcNow, current.UserId?.ToString("D"), trainerName, r.Subject,
+            DateTimeOffset.UtcNow, trainer.Id, trainer.Name, r.Subject,
             r.Positive, r.Difficulty, r.NextGoal, r.FreeObservation, criteria);
         await evaluations.AddAsync(entity, ct);
         return LearningProgressDtoFactory.Driving(entity, mapper);

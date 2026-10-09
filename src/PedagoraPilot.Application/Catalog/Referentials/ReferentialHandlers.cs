@@ -17,13 +17,25 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
         Guid[]? permittedProgramIds = null;
         if (organizationId.HasValue)
         {
+            // Tenant-owned programs belong to the organization even before they are attached
+            // to a site. Their initial referential/version is created with the program and must
+            // therefore be visible immediately in the "Version source" selector.
+            var tenantOwnedProgramIds = await programs.Query(false)
+                .Where(x => x.OrganizationId == organizationId.Value)
+                .Select(x => x.Id)
+                .ToArrayAsync(ct);
+
             var paths = await (from offering in offerings.Query(false)
                                join site in sites.Query(false) on offering.SiteId equals site.Id
                                where offering.IsActive && site.OrganizationId == organizationId.Value
                                select new { SiteId = site.Id, offering.ProgramId }).ToArrayAsync(ct);
-            permittedProgramIds = paths
+
+            var offeredProgramIds = paths
                 .Where(x => current.CanViewProgram(x.SiteId, x.ProgramId))
-                .Select(x => x.ProgramId)
+                .Select(x => x.ProgramId);
+
+            permittedProgramIds = tenantOwnedProgramIds
+                .Concat(offeredProgramIds)
                 .Distinct()
                 .ToArray();
         }
@@ -54,11 +66,14 @@ public sealed class CreateReferentialVersionCommandHandler(IReferentialRepositor
 {
     public async Task<ReferentialVersionDto> Handle(CreateReferentialVersionCommand r, CancellationToken ct)
     {
-        TenantScope.RequirePlatform(current);
         var rf = await refs.GetByIdAsync(r.ReferentialId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialNotFound);
         if (await versions.VersionExistsAsync(r.ReferentialId, r.Version, ct))
             throw new ConflictApplicationException(ErrorKeys.ReferentialVersionAlreadyExists);
         var p = await programs.GetByIdAsync(rf.ProgramId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramNotFound);
+        if (p.OrganizationId.HasValue)
+            TenantScope.Ensure(current, p.OrganizationId.Value);
+        else
+            TenantScope.RequirePlatform(current);
         var v = ReferentialVersion.CreateDraft(r.ReferentialId, r.Version, r.CertificationCode, r.EffectiveFrom, r.TotalHours, r.SheetCount, r.RequiredDocumentCount, r.EnabledModules, r.NotesKey, r.ExternalKey);
         if (r.Publish)
         {
@@ -78,10 +93,13 @@ public sealed class PublishReferentialVersionCommandHandler(IReferentialReposito
 {
     public async Task<ReferentialVersionDto> Handle(PublishReferentialVersionCommand r, CancellationToken ct)
     {
-        TenantScope.RequirePlatform(current);
         var v = await versions.GetByIdAsync(r.VersionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialVersionNotFound);
         var rf = await refs.GetByIdAsync(v.ReferentialId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialNotFound);
         var p = await programs.GetByIdAsync(rf.ProgramId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramNotFound);
+        if (p.OrganizationId.HasValue)
+            TenantScope.Ensure(current, p.OrganizationId.Value);
+        else
+            TenantScope.RequirePlatform(current);
         var actives = await versions.Query(true).Where(x => x.ReferentialId == v.ReferentialId && x.Status == ReferentialVersionStatus.Active && x.Id != v.Id).ToListAsync(ct);
         foreach (var old in actives)
             old.Archive(v.EffectiveFrom.AddDays(-1));

@@ -4,6 +4,7 @@ using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Application.Learning.Progress;
 public sealed record GetCompetencyDefinitionsQuery(Guid ReferentialVersionId) : IQuery<IReadOnlyCollection<CompetencyDefinitionDto>>;
+public sealed record GetCompetencyDefinitionCatalogQuery(Guid ReferentialVersionId) : IQuery<IReadOnlyCollection<CompetencyDefinitionDto>>;
 public sealed record GetLearnerCompetenciesQuery(EnrollmentId EnrollmentId) : IQuery<IReadOnlyCollection<LearnerCompetencyDto>>;
 public sealed record GetCohortCompetenciesQuery(CohortId CohortId) : IQuery<IReadOnlyCollection<CohortCompetencyRowDto>>;
 public sealed record GetPedagogicalTopicsQuery(Guid ReferentialVersionId) : IQuery<IReadOnlyCollection<PedagogicalTopicDto>>;

@@ -118,12 +118,55 @@ public sealed class GetMyLearnerDashboardHandler(
 }
 
 
+internal static class LearnerDetailFallback
+{
+    public static LearnerDetailReportDto Create(Guid learnerProfileId, string firstName, string lastName, string email)
+    {
+        var emptySummary = new CohortLearnerDashboardDto(
+            Guid.Empty,
+            learnerProfileId,
+            firstName ?? string.Empty,
+            lastName ?? string.Empty,
+            "unassigned",
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0m,
+            new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase),
+            0, 0, 0m, 0, 0, 0, 0, 0, 0, 0);
+
+        return new LearnerDetailReportDto(
+            Guid.Empty,
+            learnerProfileId,
+            Guid.Empty,
+            Guid.Empty,
+            Guid.Empty,
+            Guid.Empty,
+            string.Empty,
+            string.Empty,
+            DateOnly.MinValue,
+            DateOnly.MinValue,
+            firstName ?? string.Empty,
+            lastName ?? string.Empty,
+            email ?? string.Empty,
+            "unassigned",
+            emptySummary,
+            Array.Empty<LearnerAttendanceDetailDto>(),
+            Array.Empty<LearnerSkillDetailDto>(),
+            Array.Empty<LearnerTopicDetailDto>(),
+            Array.Empty<LearnerDrivingDetailDto>(),
+            Array.Empty<LearnerWorkplaceDetailDto>(),
+            Array.Empty<LearnerDocumentDetailDto>(),
+            null,
+            Array.Empty<LearnerHistoryDetailDto>());
+    }
+}
+
 public sealed class GetLearnerDetailHandler(
     IReportingReadRepository reports,
     ICohortRepository cohorts,
     IProgramOfferingRepository offerings,
     ILearnerProfileRepository profiles,
     IPersonRepository people,
+    IOrganizationMemberRepository members,
     ICurrentUser current) : IRequestHandler<GetLearnerDetailQuery, LearnerDetailReportDto>
 {
     public async Task<LearnerDetailReportDto> Handle(GetLearnerDetailQuery q, CancellationToken ct)
@@ -137,10 +180,34 @@ public sealed class GetLearnerDetailHandler(
                 throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
         }
 
-        var result = await reports.GetLearnerDetailAsync(q.LearnerProfileId, ReportingScope.Organization(current), q.CohortId, ct)
+        var result = await reports.GetLearnerDetailAsync(q.LearnerProfileId, ReportingScope.Organization(current), q.CohortId, ct);
+        if (result is not null)
+        {
+            await ReportingScope.EnsureCohortAsync(result.CohortId, cohorts, offerings, current, ct);
+            return result;
+        }
+
+        // A Student created through access management can legitimately have a
+        // LearnerProfile before being enrolled in a cohort. Reporting used to
+        // start from Enrollment, so such a learner incorrectly became 404.
+        var profile = await profiles.GetByIdAsync(new PedagoraPilot.Domain.Identifiers.LearnerProfileId(q.LearnerProfileId), false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
-        await ReportingScope.EnsureCohortAsync(result.CohortId, cohorts, offerings, current, ct);
-        return result;
+        var person = await people.GetByIdAsync(profile.PersonId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.PersonNotFound);
+
+        if (!PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(current))
+        {
+            var organizationId = ReportingScope.Organization(current)
+                ?? throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+            if (!profile.AuthGateUserId.HasValue)
+                throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
+
+            var studentMembers = await members.GetStudentDirectoryAsync(organizationId, ct);
+            if (!studentMembers.Any(x => x.AuthGateUserId == profile.AuthGateUserId.Value))
+                throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
+        }
+
+        return LearnerDetailFallback.Create(profile.Id.Value, person.FirstName, person.LastName, person.Email);
     }
 }
 
@@ -158,10 +225,16 @@ public sealed class GetMyLearnerDetailHandler(
             .ResolveProfileAsync(profiles, people, current, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
 
-        var result = await reports.GetLearnerDetailAsync(profile.Id.Value, ReportingScope.Organization(current), q.CohortId, ct)
-            ?? throw new NotFoundApplicationException(ErrorKeys.LearnerNotFound);
-        await ReportingScope.EnsureCohortAsync(result.CohortId, cohorts, offerings, current, ct);
-        return result;
+        var result = await reports.GetLearnerDetailAsync(profile.Id.Value, ReportingScope.Organization(current), q.CohortId, ct);
+        if (result is not null)
+        {
+            await ReportingScope.EnsureCohortAsync(result.CohortId, cohorts, offerings, current, ct);
+            return result;
+        }
+
+        var person = await people.GetByIdAsync(profile.PersonId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.PersonNotFound);
+        return LearnerDetailFallback.Create(profile.Id.Value, person.FirstName, person.LastName, person.Email);
     }
 }
 

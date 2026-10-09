@@ -20,6 +20,7 @@ public sealed class StartupRegressionTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["AuthGate:BaseUrl"] = "http://localhost:8081", ["AuthGate:Issuer"] = "test-issuer", ["AuthGate:Audience"] = "test-audience" }).Build();
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IConfiguration>(configuration);
         services.AddPedagoraAuthentication(configuration);
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>().Get(JwtBearerDefaults.AuthenticationScheme);

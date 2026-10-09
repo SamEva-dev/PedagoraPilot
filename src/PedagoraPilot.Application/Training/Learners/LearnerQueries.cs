@@ -3,6 +3,7 @@ using PedagoraPilot.Contracts.Training;
 using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Application.Training.Learners;
+public sealed record GetLearnerDirectoryQuery() : IQuery<IReadOnlyCollection<LearnerDirectoryDto>>;
 public sealed record GetCohortLearnersQuery(CohortId CohortId) : IQuery<IReadOnlyCollection<LearnerDto>>;
 public sealed record GetLearnerQuery(LearnerProfileId LearnerProfileId) : IQuery<LearnerDto>;
 public sealed record GetEnrollmentLearnerQuery(EnrollmentId EnrollmentId) : IQuery<LearnerDto>;

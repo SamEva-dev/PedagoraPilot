@@ -42,6 +42,19 @@ public sealed class OrganizationMemberRepository(PedagoraPilotDbContext db) : IO
     }
 
 
+    public async Task<IReadOnlyCollection<MemberDirectoryEntry>> GetStudentDirectoryAsync(Guid organizationId, CancellationToken cancellationToken = default)
+    {
+        var studentIds = db.StudentProfiles.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .Select(x => x.MemberId);
+        var rows = await db.OrganizationMembers.AsNoTracking()
+            .Where(x => x.OrganizationId == organizationId && x.IsActive && studentIds.Contains(x.Id))
+            .OrderBy(x => x.LastName).ThenBy(x => x.FirstName)
+            .ToListAsync(cancellationToken);
+        return rows.Select(x => new MemberDirectoryEntry(x.AuthGateUserId, x.Email, x.FirstName, x.LastName, x.DisplayName,
+            new[] { "student" })).ToArray();
+    }
+
     public async Task<IReadOnlyCollection<string>> GetRoleCodesAsync(Guid organizationId, Guid authGateUserId, CancellationToken cancellationToken = default)
     {
         var member = await db.OrganizationMembers.AsNoTracking()

@@ -39,7 +39,7 @@ public static class AuthenticationExtensions
 
         // DI-backed named-options configuration.
         // This keeps the signing-key provider directly captured by the JwtBearer options
-        // and removes the previous InstancePropertyBag workaround.
+        // through dependency injection.
         services.AddSingleton<
             IConfigureOptions<JwtBearerOptions>,
             AuthGateJwtBearerOptionsConfigurator>();

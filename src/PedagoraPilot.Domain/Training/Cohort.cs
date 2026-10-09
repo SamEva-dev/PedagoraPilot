@@ -9,7 +9,7 @@ public sealed class Cohort : AggregateRoot<CohortId>
     {
     }
 
-    private Cohort(CohortId id, Guid organizationId, Guid siteId, Guid programOfferingId, Guid referentialVersionId, string code, string name, DateOnly startDate, DateOnly endDate, int capacity, Guid? pedagogicalManagerAuthGateUserId, string? pedagogicalManagerDisplayName, string? externalKey) : base(id)
+    private Cohort(CohortId id, Guid organizationId, Guid siteId, Guid programOfferingId, Guid referentialVersionId, string code, string name, DateOnly startDate, DateOnly endDate, int capacity, Guid? pedagogicalManagerAuthGateUserId, string? pedagogicalManagerDisplayName, string? externalKey, CohortStatus initialStatus) : base(id)
     {
         OrganizationId = organizationId;
         SiteId = siteId;
@@ -25,7 +25,9 @@ public sealed class Cohort : AggregateRoot<CohortId>
         PedagogicalManagerAuthGateUserId = pedagogicalManagerAuthGateUserId;
         PedagogicalManagerDisplayName = NormalizeOptional(pedagogicalManagerDisplayName);
         ExternalKey = NormalizeOptional(externalKey);
-        Status = CohortStatus.Planned;
+        if (initialStatus is not (CohortStatus.Draft or CohortStatus.Planned or CohortStatus.Active))
+            throw new DomainException("COHORT_STATUS_INVALID");
+        Status = initialStatus;
         CreatedAtUtc = UpdatedAtUtc = DateTime.UtcNow;
         Version = 1;
     }
@@ -47,10 +49,7 @@ public sealed class Cohort : AggregateRoot<CohortId>
     public DateTime UpdatedAtUtc { get; private set; }
     public long Version { get; private set; }
 
-    public static Cohort Create(Guid organizationId, Guid siteId, Guid programOfferingId, 
-        Guid referentialVersionId, string code, string name, DateOnly startDate, 
-        DateOnly endDate, int capacity, Guid? pedagogicalManagerAuthGateUserId, 
-        string? pedagogicalManagerDisplayName, string? externalKey = null)
+    public static Cohort Create(Guid organizationId, Guid siteId, Guid programOfferingId, Guid referentialVersionId, string code, string name, DateOnly startDate, DateOnly endDate, int capacity, Guid? pedagogicalManagerAuthGateUserId, string? pedagogicalManagerDisplayName, string? externalKey = null, CohortStatus initialStatus = CohortStatus.Planned)
     {
         if (organizationId == Guid.Empty)
             throw new DomainException("COHORT_ORGANIZATION_REQUIRED");
@@ -60,7 +59,7 @@ public sealed class Cohort : AggregateRoot<CohortId>
             throw new DomainException("COHORT_PROGRAM_OFFERING_REQUIRED");
         if (referentialVersionId == Guid.Empty)
             throw new DomainException("COHORT_REFERENTIAL_VERSION_REQUIRED");
-        var cohort = new Cohort(CohortId.New(), organizationId, siteId, programOfferingId, referentialVersionId, code, name, startDate, endDate, capacity, pedagogicalManagerAuthGateUserId, pedagogicalManagerDisplayName, externalKey);
+        var cohort = new Cohort(CohortId.New(), organizationId, siteId, programOfferingId, referentialVersionId, code, name, startDate, endDate, capacity, pedagogicalManagerAuthGateUserId, pedagogicalManagerDisplayName, externalKey, initialStatus);
         cohort.RaiseDomainEvent(new CohortCreatedDomainEvent(cohort.Id, organizationId, programOfferingId));
         return cohort;
     }
@@ -81,6 +80,45 @@ public sealed class Cohort : AggregateRoot<CohortId>
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new CohortUpdatedDomainEvent(Id, OrganizationId));
     }
+
+    /// <summary>Explicit management transfer; unlike TryAssignPedagogicalManager, this is allowed to replace an existing owner.</summary>
+    public void ReassignPedagogicalManager(Guid authGateUserId, string displayName)
+    {
+        if (Status is CohortStatus.Completed or CohortStatus.Cancelled)
+            throw new DomainException("COHORT_CLOSED");
+        if (authGateUserId == Guid.Empty || string.IsNullOrWhiteSpace(displayName))
+            throw new DomainException("COHORT_PEDAGOGICAL_MANAGER_REQUIRED");
+        var normalizedName = NormalizeOptional(displayName);
+        if (PedagogicalManagerAuthGateUserId == authGateUserId && PedagogicalManagerDisplayName == normalizedName)
+            return;
+        PedagogicalManagerAuthGateUserId = authGateUserId;
+        PedagogicalManagerDisplayName = normalizedName;
+        UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new CohortUpdatedDomainEvent(Id, OrganizationId));
+    }
+
+    public bool TryAssignPedagogicalManager(Guid authGateUserId, string displayName)
+    {
+        if (authGateUserId == Guid.Empty)
+            throw new DomainException("COHORT_PEDAGOGICAL_MANAGER_REQUIRED");
+
+        if (PedagogicalManagerAuthGateUserId.HasValue
+            && PedagogicalManagerAuthGateUserId.Value != authGateUserId)
+            return false;
+
+        var normalizedName = NormalizeOptional(displayName);
+        if (PedagogicalManagerAuthGateUserId == authGateUserId
+            && string.Equals(PedagogicalManagerDisplayName, normalizedName, StringComparison.Ordinal))
+            return true;
+
+        PedagogicalManagerAuthGateUserId = authGateUserId;
+        PedagogicalManagerDisplayName = normalizedName;
+        UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new CohortUpdatedDomainEvent(Id, OrganizationId));
+        return true;
+    }
+
+    public void MarkDeleted() => RaiseDomainEvent(new CohortDeletedDomainEvent(Id, OrganizationId));
 
     private static string NormalizeCode(string value)
     {

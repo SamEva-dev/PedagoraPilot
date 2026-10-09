@@ -39,6 +39,18 @@ public sealed class ExceptionHandlingMiddleware
             _logger.LogWarning(exception, "Optimistic concurrency conflict.");
             await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.ConcurrencyConflict);
         }
+        // The first attendance write may race against another transaction which
+        // inserts the same session sheet. Preserve the database's unique index as
+        // final arbiter, and expose a retryable conflict rather than a generic 500.
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && ((pg.TableName?.Equals("attendance_sheets", StringComparison.OrdinalIgnoreCase) ?? false)
+                || (pg.ConstraintName?.Contains("attendance_sheets", StringComparison.OrdinalIgnoreCase) ?? false)))
+        {
+            _logger.LogWarning(exception, "Concurrent attendance sheet initialization.");
+            await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.ConcurrencyConflict);
+        }
         catch (UnauthorizedAccessException exception)
         {
             _logger.LogWarning(exception, "Unauthorized operation.");

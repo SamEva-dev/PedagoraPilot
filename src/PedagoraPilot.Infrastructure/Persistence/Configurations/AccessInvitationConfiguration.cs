@@ -21,6 +21,9 @@ public sealed class AccessInvitationConfiguration : IEntityTypeConfiguration<Acc
         b.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(32).IsRequired();
         b.Property(x => x.InvitedByUserId).IsRequired();
+        b.Property(x => x.Phone).HasMaxLength(40);
+        b.Property(x => x.BirthDate);
+        b.Property(x => x.EnrolledOn);
         b.Property(x => x.FailureReason).HasMaxLength(2000);
         b.Property(x => x.CreatedAtUtc).IsRequired();
         b.Property(x => x.UpdatedAtUtc).IsRequired();

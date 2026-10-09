@@ -50,7 +50,7 @@ public sealed class CertificationCandidate : AggregateRoot<CertificationCandidat
 
     public void SetEligibility(bool eligible, string snapshotJson)
     {
-        if (Status is CertificationCandidateStatus.Completed or CertificationCandidateStatus.Published)
+        if (Status is CertificationCandidateStatus.InProgress or CertificationCandidateStatus.AssessmentsValidated or CertificationCandidateStatus.Completed or CertificationCandidateStatus.Published)
             throw new DomainException("CERTIFICATION_CANDIDATE_LOCKED");
         Eligible = eligible;
         EligibilitySnapshotJson = string.IsNullOrWhiteSpace(snapshotJson) ? "{}" : snapshotJson;
@@ -63,7 +63,8 @@ public sealed class CertificationCandidate : AggregateRoot<CertificationCandidat
     {
         if (Eligible != true)
             throw new DomainException("CERTIFICATION_CANDIDATE_NOT_ELIGIBLE");
-        if (Status == CertificationCandidateStatus.Published)
+        // A jury decision freezes the assessment record; correction is a separate audited workflow.
+        if (Status is CertificationCandidateStatus.AssessmentsValidated or CertificationCandidateStatus.Completed or CertificationCandidateStatus.Published)
             throw new DomainException("CERTIFICATION_CANDIDATE_LOCKED");
         var existing = _assessments.SingleOrDefault(x => x.StepDefinitionId == stepId);
         if (existing is not null)
@@ -82,12 +83,70 @@ public sealed class CertificationCandidate : AggregateRoot<CertificationCandidat
         return a;
     }
 
-    public void Decide(CertificationDecision decision, string? comment)
+    /// <summary>
+    /// Writes the entire jury grid to one aggregate. Transactional persistence is provided
+    /// by UnitOfWorkBehavior for the calling command. Validation precedes mutation.
+    /// Pending is a draft result and cannot satisfy final validation.
+    /// </summary>
+    public void RecordAssessmentBatch(
+        IReadOnlyCollection<CertificationAssessmentInput> entries,
+        IReadOnlyCollection<CertificationStepDefinitionId> schemeStepIds,
+        bool finalize)
     {
-        if (decision == CertificationDecision.Pending)
-            throw new DomainException("CERTIFICATION_DECISION_INVALID");
         if (Eligible != true)
             throw new DomainException("CERTIFICATION_CANDIDATE_NOT_ELIGIBLE");
+        if (Status is CertificationCandidateStatus.AssessmentsValidated or CertificationCandidateStatus.Completed or CertificationCandidateStatus.Published)
+            throw new DomainException("CERTIFICATION_CANDIDATE_LOCKED");
+        if (entries is null || entries.Count == 0)
+            throw new DomainException("CERTIFICATION_ASSESSMENTS_REQUIRED");
+        if (schemeStepIds is null || schemeStepIds.Count == 0)
+            throw new DomainException("CERTIFICATION_SCHEME_INCOMPLETE");
+        var allowed = schemeStepIds.ToHashSet();
+        var seen = new HashSet<CertificationStepDefinitionId>();
+        foreach (var entry in entries)
+        {
+            if (entry.StepDefinitionId.IsEmpty || !allowed.Contains(entry.StepDefinitionId))
+                throw new DomainException("CERTIFICATION_STEP_NOT_FOUND");
+            if (!seen.Add(entry.StepDefinitionId))
+                throw new DomainException("CERTIFICATION_ASSESSMENT_DUPLICATE_STEP");
+            if (!Enum.IsDefined(entry.Outcome))
+                throw new DomainException("CERTIFICATION_ASSESSMENT_OUTCOME_INVALID");
+            if (string.IsNullOrWhiteSpace(entry.JuryDisplayName))
+                throw new DomainException("CERTIFICATION_JURY_REQUIRED");
+            if (entry.Score.HasValue && (entry.Score.Value < 0 || entry.Score.Value > 100))
+                throw new DomainException("CERTIFICATION_SCORE_INVALID");
+            if (entry.Comment is { Length: > 4000 })
+                throw new DomainException("CERTIFICATION_COMMENT_TOO_LONG");
+        }
+        if (finalize && schemeStepIds.Any(step =>
+            entries.FirstOrDefault(a => a.StepDefinitionId == step) is { } input
+                ? input.Outcome == CertificationAssessmentOutcome.Pending
+                : !_assessments.Any(a => a.StepDefinitionId == step && a.Outcome != CertificationAssessmentOutcome.Pending)))
+            throw new DomainException("CERTIFICATION_ASSESSMENTS_INCOMPLETE");
+
+        foreach (var entry in entries)
+            RecordAssessment(entry.StepDefinitionId, entry.JuryDisplayName, entry.Outcome, entry.Score, entry.Comment);
+
+        if (finalize)
+        {
+            Status = CertificationCandidateStatus.AssessmentsValidated;
+            UpdatedAtUtc = DateTime.UtcNow;
+        }
+    }
+
+    public void Decide(CertificationDecision decision, string? comment, IReadOnlyCollection<CertificationStepDefinitionId> requiredStepIds)
+    {
+        if (!Enum.IsDefined(decision) || decision == CertificationDecision.Pending)
+            throw new DomainException("CERTIFICATION_DECISION_INVALID");
+        if (Status is CertificationCandidateStatus.Completed or CertificationCandidateStatus.Published)
+            throw new DomainException("CERTIFICATION_CANDIDATE_LOCKED");
+        if (Eligible != true)
+            throw new DomainException("CERTIFICATION_CANDIDATE_NOT_ELIGIBLE");
+        if (requiredStepIds is null || requiredStepIds.Count == 0)
+            throw new DomainException("CERTIFICATION_SCHEME_INCOMPLETE");
+        if (decision != CertificationDecision.Absent && requiredStepIds.Any(id =>
+                !_assessments.Any(a => a.StepDefinitionId == id && a.Outcome != CertificationAssessmentOutcome.Pending)))
+            throw new DomainException("CERTIFICATION_ASSESSMENTS_INCOMPLETE");
         Decision = decision;
         DecisionComment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
         DecisionAtUtc = DateTime.UtcNow;

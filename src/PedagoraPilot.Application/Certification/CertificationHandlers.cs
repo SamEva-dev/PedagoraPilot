@@ -9,6 +9,7 @@ using PedagoraPilot.Application.Training.Learners;
 using PedagoraPilot.Contracts.Certification;
 using PedagoraPilot.Domain.Certification;
 using PedagoraPilot.Domain.Identifiers;
+using PedagoraPilot.Domain.Training;
 
 namespace PedagoraPilot.Application.Certification;
 internal static class CertMap
@@ -167,6 +168,23 @@ public sealed class PlanCertificationExamSessionCommandHandler(ICertificationExa
     }
 }
 
+// Explicit lifecycle transition. Publishing must never implicitly start an exam session.
+public sealed class StartCertificationExamSessionCommandHandler(
+    ICertificationExamSessionRepository sessions, ICohortRepository cohorts,
+    IProgramOfferingRepository offerings, ICurrentUser current)
+    : IRequestHandler<StartCertificationExamSessionCommand, CertificationExamSessionDto>
+{
+    public async Task<CertificationExamSessionDto> Handle(StartCertificationExamSessionCommand r, CancellationToken ct)
+    {
+        var session = await sessions.GetByIdAsync(r.SessionId, true, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        TenantScope.Ensure(current, session.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        session.Start();
+        return CertMap.Session(session);
+    }
+}
+
 public sealed class RegisterCohortCandidatesCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ICertificationCandidateRepository candidates, ICurrentUser current) : IRequestHandler<RegisterCohortCandidatesCommand, int>
 {
     public async Task<int> Handle(RegisterCohortCandidatesCommand r, CancellationToken ct)
@@ -174,7 +192,14 @@ public sealed class RegisterCohortCandidatesCommandHandler(ICertificationExamSes
         var s = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, s.OrganizationId);
         await CertificationContextualAccess.EnsureSessionAsync(s, cohorts, offerings, current, manage: true, ct);
-        var rows = await enrollments.Query(false).Where(x => x.CohortId == s.CohortId).ToListAsync(ct);
+        if (s.Status is not (CertificationExamSessionStatus.Draft or CertificationExamSessionStatus.Planned))
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
+        // A candidature does not resurrect a cancelled/withdrawn/pending enrollment.
+        // A completed enrollment remains eligible for the final exam after training ends.
+        var rows = await enrollments.Query(false)
+            .Where(x => x.CohortId == s.CohortId && x.OrganizationId == s.OrganizationId
+                && (x.Status == EnrollmentStatus.Active || x.Status == EnrollmentStatus.Completed))
+            .ToListAsync(ct);
         var count = 0;
         foreach (var e in rows)
         {
@@ -196,6 +221,8 @@ public sealed class EvaluateCertificationEligibilityCommandHandler(ICertificatio
         TenantScope.Ensure(current, x.OrganizationId);
         var examSession = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         await CertificationContextualAccess.EnsureSessionAsync(examSession, cohorts, offerings, current, manage: true, ct);
+        if (examSession.Status is CertificationExamSessionStatus.Cancelled or CertificationExamSessionStatus.Completed or CertificationExamSessionStatus.Published)
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
         x.SetEligibility(r.Eligible, JsonSerializer.Serialize(new { eligible = r.Eligible, blockers = r.Blockers ?? [] }));
         return CertMap.Candidate(x);
     }
@@ -210,17 +237,65 @@ public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCa
         var session = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
         await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
+        // Recording marks/assessments is only legitimate while the exam is running.
+        if (session.Status != CertificationExamSessionStatus.InProgress)
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
         var scheme = await schemes.Query(false).Include(a => a.Steps).SingleOrDefaultAsync(a => a.Id == session.SchemeId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSchemeNotFound);
         if (scheme.Steps.All(a => a.Id != r.StepDefinitionId))
             throw new ValidationApplicationException(ErrorKeys.CertificationStepNotFound);
-        if (!Enum.TryParse<CertificationAssessmentOutcome>(r.Outcome, true, out var outcome))
+        if (!Enum.TryParse<CertificationAssessmentOutcome>(r.Outcome, true, out var outcome) || !Enum.IsDefined(outcome))
             throw new ValidationApplicationException(ErrorKeys.CertificationAssessmentOutcomeInvalid);
         x.RecordAssessment(r.StepDefinitionId, r.JuryDisplayName, outcome, r.Score, r.Comment);
         return CertMap.Candidate(x);
     }
 }
 
-public sealed class RecordCertificationDecisionCommandHandler(ICertificationCandidateRepository candidates, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<RecordCertificationDecisionCommand, CertificationCandidateDto>
+
+/// <summary>One command, one candidate aggregate, one UnitOfWork transaction.</summary>
+public sealed class RecordCertificationAssessmentBatchCommandHandler(
+    ICertificationCandidateRepository candidates,
+    ICertificationSchemeRepository schemes,
+    ICertificationExamSessionRepository sessions,
+    ICohortRepository cohorts,
+    IProgramOfferingRepository offerings,
+    IJuryAssignmentRepository juries,
+    ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentBatchCommand, CertificationCandidateDto>
+{
+    public async Task<CertificationCandidateDto> Handle(RecordCertificationAssessmentBatchCommand r, CancellationToken ct)
+    {
+        var candidate = await candidates.Query(true).Include(x => x.Assessments)
+            .SingleOrDefaultAsync(x => x.Id == r.CandidateId, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CertificationCandidateNotFound);
+        TenantScope.Ensure(current, candidate.OrganizationId);
+        var session = await sessions.GetByIdAsync(candidate.ExamSessionId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
+        if (session.Status != CertificationExamSessionStatus.InProgress)
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
+        var scheme = await schemes.Query(false).Include(x => x.Steps)
+            .SingleOrDefaultAsync(x => x.Id == session.SchemeId, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSchemeNotFound);
+        if (r.Assessments is null || r.Assessments.Count == 0 || r.Assessments.Count > scheme.Steps.Count)
+            throw new ValidationApplicationException(ErrorKeys.CertificationAssessmentsRequired);
+        var items = new List<CertificationAssessmentInput>(r.Assessments.Count);
+        foreach (var assessment in r.Assessments)
+        {
+            if (assessment is null)
+                throw new ValidationApplicationException(ErrorKeys.CertificationAssessmentsRequired);
+            if (!Enum.TryParse<CertificationAssessmentOutcome>(assessment.Outcome, true, out var outcome)
+                || !Enum.IsDefined(outcome))
+                throw new ValidationApplicationException(ErrorKeys.CertificationAssessmentOutcomeInvalid);
+            items.Add(new CertificationAssessmentInput(new CertificationStepDefinitionId(assessment.StepDefinitionId),
+                assessment.JuryDisplayName, outcome, assessment.Score, assessment.Comment));
+        }
+        candidate.RecordAssessmentBatch(items, scheme.Steps.Select(step => step.Id).ToArray(), r.Finalize);
+        // ITransactionalRequest -> UnitOfWorkBehavior commits the aggregate and its events atomically.
+        return CertMap.Candidate(candidate);
+    }
+}
+
+public sealed class RecordCertificationDecisionCommandHandler(ICertificationCandidateRepository candidates, ICertificationExamSessionRepository sessions, ICertificationSchemeRepository schemes, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser current) : IRequestHandler<RecordCertificationDecisionCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(RecordCertificationDecisionCommand r, CancellationToken ct)
     {
@@ -228,9 +303,17 @@ public sealed class RecordCertificationDecisionCommandHandler(ICertificationCand
         TenantScope.Ensure(current, x.OrganizationId);
         var examSession = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         await CertificationContextualAccess.EnsureSessionAsync(examSession, cohorts, offerings, current, manage: true, ct);
-        if (!Enum.TryParse<CertificationDecision>(r.Decision, true, out var d))
+        // A jury decision must not be recorded before the session has started.
+        if (examSession.Status != CertificationExamSessionStatus.InProgress)
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
+        if (!Enum.TryParse<CertificationDecision>(r.Decision, true, out var d) || !Enum.IsDefined(d))
             throw new ValidationApplicationException(ErrorKeys.CertificationDecisionInvalid);
-        x.Decide(d, r.Comment);
+        // Decisions must be based on the steps of the session's *own* published scheme.
+        // An absent candidate can be recorded without sitting the assessments.
+        var scheme = await schemes.Query(false).Include(a => a.Steps)
+            .SingleOrDefaultAsync(a => a.Id == examSession.SchemeId, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSchemeNotFound);
+        x.Decide(d, r.Comment, scheme.Steps.Select(step => step.Id).ToArray());
         return CertMap.Candidate(x);
     }
 }
@@ -261,6 +344,8 @@ public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository
         var s = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, s.OrganizationId);
         await CertificationContextualAccess.EnsureSessionAsync(s, cohorts, offerings, current, manage: true, ct);
+        if (s.Status is CertificationExamSessionStatus.Cancelled or CertificationExamSessionStatus.Completed or CertificationExamSessionStatus.Published)
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
         var j = JuryAssignment.Create(s.OrganizationId, s.Id, r.AuthGateUserId, r.DisplayName, r.Role);
         await juries.AddAsync(j, ct);
         return CertMap.Jury(j);

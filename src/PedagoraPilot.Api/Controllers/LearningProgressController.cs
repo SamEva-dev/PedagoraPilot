@@ -14,6 +14,18 @@ public sealed class LearningProgressController(IMediator mediator) : ControllerB
     [HttpGet("referentials/{referentialVersionId:guid}/competencies")]
     [HasPermission(PedagoraPilotPermissionCodes.Skills.View)]
     public Task<IReadOnlyCollection<CompetencyDefinitionDto>> GetDefinitions(Guid referentialVersionId, CancellationToken ct) => mediator.Send(new GetCompetencyDefinitionsQuery(referentialVersionId), ct);
+    [HttpGet("referentials/{referentialVersionId:guid}/competencies/catalog")]
+    [HasPermission(PedagoraPilotPermissionCodes.Administration.Manage)]
+    public Task<IReadOnlyCollection<CompetencyDefinitionDto>> GetCompetencyCatalog(Guid referentialVersionId, CancellationToken ct) => mediator.Send(new GetCompetencyDefinitionCatalogQuery(referentialVersionId), ct);
+    [HttpPost("referentials/{referentialVersionId:guid}/competencies")]
+    [HasPermission(PedagoraPilotPermissionCodes.Administration.Manage)]
+    public Task<CompetencyDefinitionDto> CreateCompetency(Guid referentialVersionId, [FromBody] SaveCompetencyDefinitionRequest request, CancellationToken ct) => mediator.Send(new CreateCompetencyDefinitionCommand(referentialVersionId, request.ParentId, request.Code, request.Title, request.Kind, request.SortOrder, request.Active), ct);
+    [HttpPut("referentials/{referentialVersionId:guid}/competencies/{competencyDefinitionId:guid}")]
+    [HasPermission(PedagoraPilotPermissionCodes.Administration.Manage)]
+    public Task<CompetencyDefinitionDto> UpdateCompetency(Guid referentialVersionId, Guid competencyDefinitionId, [FromBody] SaveCompetencyDefinitionRequest request, CancellationToken ct) => mediator.Send(new UpdateCompetencyDefinitionCommand(referentialVersionId, new CompetencyDefinitionId(competencyDefinitionId), request.ParentId, request.Code, request.Title, request.Kind, request.SortOrder, request.Active), ct);
+    [HttpDelete("referentials/{referentialVersionId:guid}/competencies/{competencyDefinitionId:guid}")]
+    [HasPermission(PedagoraPilotPermissionCodes.Administration.Manage)]
+    public Task<bool> DeleteCompetency(Guid referentialVersionId, Guid competencyDefinitionId, CancellationToken ct) => mediator.Send(new DeleteCompetencyDefinitionCommand(referentialVersionId, new CompetencyDefinitionId(competencyDefinitionId)), ct);
     [HttpGet("enrollments/{enrollmentId:guid}/competencies")]
     [HasPermission(PedagoraPilotPermissionCodes.Skills.View)]
     public Task<IReadOnlyCollection<LearnerCompetencyDto>> GetLearnerCompetencies(Guid enrollmentId, CancellationToken ct) => mediator.Send(new GetLearnerCompetenciesQuery(new EnrollmentId(enrollmentId)), ct);
@@ -32,6 +44,9 @@ public sealed class LearningProgressController(IMediator mediator) : ControllerB
     [HttpPost("referentials/{referentialVersionId:guid}/topics")]
     [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
     public Task<PedagogicalTopicDto> CreateTopic(Guid referentialVersionId, [FromBody] SavePedagogicalTopicRequest request, CancellationToken ct) => mediator.Send(new CreatePedagogicalTopicCommand(referentialVersionId, request.Number, request.Title, request.Category, request.DurationMinutes, request.Reference, request.Active, request.Objective, request.Example, request.Correction), ct);
+    [HttpPost("referentials/{referentialVersionId:guid}/topics/import/tp-ecsr-58")]
+    [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
+    public Task<IReadOnlyCollection<PedagogicalTopicDto>> ImportTpEcsr58(Guid referentialVersionId, CancellationToken ct) => mediator.Send(new ImportTpEcsr58TopicsCommand(referentialVersionId), ct);
     [HttpPut("referentials/{referentialVersionId:guid}/topics/{topicId:guid}")]
     [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
     public Task<PedagogicalTopicDto> UpdateTopicCatalog(Guid referentialVersionId, Guid topicId, [FromBody] SavePedagogicalTopicRequest request, CancellationToken ct) => mediator.Send(new UpdatePedagogicalTopicCommand(referentialVersionId, new PedagogicalTopicId(topicId), request.Number, request.Title, request.Category, request.DurationMinutes, request.Reference, request.Active, request.Objective, request.Example, request.Correction), ct);

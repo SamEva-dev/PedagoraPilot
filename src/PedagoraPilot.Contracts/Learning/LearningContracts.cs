@@ -1,6 +1,7 @@
 namespace PedagoraPilot.Contracts.Learning;
 
 public sealed record CompetencyDefinitionDto(Guid Id, Guid ReferentialVersionId, Guid? ParentId, string Code, string Title, string Kind, int SortOrder, bool Active);
+public sealed record SaveCompetencyDefinitionRequest(Guid? ParentId, string Code, string Title, string Kind, int SortOrder, bool Active);
 public sealed record LearnerCompetencyDto(Guid Id, Guid EnrollmentId, Guid CompetencyDefinitionId, string Code, string Title, string Level, decimal? Score, string? Comment, string? EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc);
 public sealed record CohortCompetencyRowDto(Guid EnrollmentId, string FirstName, string LastName, IReadOnlyCollection<LearnerCompetencyDto> Competencies);
 public sealed record EvaluateCompetencyRequest(string Level, decimal? Score, string? Comment, Guid? EvaluatorAuthGateUserId, string? EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc);

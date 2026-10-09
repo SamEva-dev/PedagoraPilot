@@ -33,6 +33,7 @@ public sealed class PedagoraPilotDbContext : DbContext
     public DbSet<ProgramCapabilityRow> ProgramCapabilities => Set<ProgramCapabilityRow>();
     public DbSet<ReferentialVersionCapabilityRow> ReferentialVersionCapabilities => Set<ReferentialVersionCapabilityRow>();
     public DbSet<Cohort> Cohorts => Set<Cohort>();
+    public DbSet<CohortTrainerAssignment> CohortTrainerAssignments => Set<CohortTrainerAssignment>();
     public DbSet<Person> People => Set<Person>();
     public DbSet<LearnerProfile> LearnerProfiles => Set<LearnerProfile>();
     public DbSet<Enrollment> Enrollments => Set<Enrollment>();
@@ -101,6 +102,7 @@ public sealed class PedagoraPilotDbContext : DbContext
         Touch<Referential>(now);
         Touch<ReferentialVersion>(now);
         Touch<Cohort>(now);
+        Touch<CohortTrainerAssignment>(now);
         Touch<Person>(now);
         Touch<LearnerProfile>(now);
         Touch<Enrollment>(now);
@@ -136,8 +138,23 @@ public sealed class PedagoraPilotDbContext : DbContext
             var version = e.Metadata.FindProperty("Version");
             if (version is not null)
             {
-                var original = Convert.ToInt64(e.Property("Version").OriginalValue ?? 0L);
-                e.Property("Version").CurrentValue = original + 1;
+                var versionEntry = e.Property("Version");
+                var originalValue = versionEntry.OriginalValue;
+
+                // Preserve the CLR type declared by the entity property. Most entities use long,
+                // while Organization and TrainingSite use uint. Assigning a boxed Int64 to a
+                // UInt32 property makes EF Core's ValueComparer throw InvalidCastException.
+                versionEntry.CurrentValue = version.ClrType switch
+                {
+                    var t when t == typeof(uint) => checked(Convert.ToUInt32(originalValue ?? 0u) + 1u),
+                    var t when t == typeof(ulong) => checked(Convert.ToUInt64(originalValue ?? 0UL) + 1UL),
+                    var t when t == typeof(int) => checked(Convert.ToInt32(originalValue ?? 0) + 1),
+                    var t when t == typeof(short) => checked((short)(Convert.ToInt16(originalValue ?? (short)0) + 1)),
+                    var t when t == typeof(ushort) => checked((ushort)(Convert.ToUInt16(originalValue ?? (ushort)0) + 1)),
+                    var t when t == typeof(byte) => checked((byte)(Convert.ToByte(originalValue ?? (byte)0) + 1)),
+                    var t when t == typeof(sbyte) => checked((sbyte)(Convert.ToSByte(originalValue ?? (sbyte)0) + 1)),
+                    _ => checked(Convert.ToInt64(originalValue ?? 0L) + 1L)
+                };
             }
         }
     }
@@ -150,30 +167,32 @@ public sealed class PedagoraPilotDbContext : DbContext
         // dictionary enumerator and throw "Collection was modified".
         var programs = ChangeTracker
             .Entries<TrainingProgram>()
-            .Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .ToList();
 
         foreach (var e in programs)
         {
             var id = e.Entity.Id;
-            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
-
             ProgramCapabilities.RemoveRange(ProgramCapabilities.Where(x => x.ProgramId == id));
+            if (e.State == EntityState.Deleted) continue;
+
+            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
             foreach (var c in capabilities)
                 ProgramCapabilities.Add(new ProgramCapabilityRow { ProgramId = id, CapabilityCode = c });
         }
 
         var referentialVersions = ChangeTracker
             .Entries<ReferentialVersion>()
-            .Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .ToList();
 
         foreach (var e in referentialVersions)
         {
             var id = e.Entity.Id;
-            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
-
             ReferentialVersionCapabilities.RemoveRange(ReferentialVersionCapabilities.Where(x => x.ReferentialVersionId == id));
+            if (e.State == EntityState.Deleted) continue;
+
+            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
             foreach (var c in capabilities)
                 ReferentialVersionCapabilities.Add(new ReferentialVersionCapabilityRow { ReferentialVersionId = id, CapabilityCode = c });
         }

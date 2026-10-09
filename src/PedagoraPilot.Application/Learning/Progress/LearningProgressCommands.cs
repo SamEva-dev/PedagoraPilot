@@ -4,10 +4,14 @@ using PedagoraPilot.Contracts.Learning;
 using PedagoraPilot.Domain.Identifiers;
 
 namespace PedagoraPilot.Application.Learning.Progress;
+public sealed record CreateCompetencyDefinitionCommand(Guid ReferentialVersionId, Guid? ParentId, string Code, string Title, string Kind, int SortOrder, bool Active) : ICommand<CompetencyDefinitionDto>;
+public sealed record UpdateCompetencyDefinitionCommand(Guid ReferentialVersionId, CompetencyDefinitionId CompetencyDefinitionId, Guid? ParentId, string Code, string Title, string Kind, int SortOrder, bool Active) : ICommand<CompetencyDefinitionDto>;
+public sealed record DeleteCompetencyDefinitionCommand(Guid ReferentialVersionId, CompetencyDefinitionId CompetencyDefinitionId) : ICommand<bool>;
 public sealed record EvaluateCompetencyCommand(EnrollmentId EnrollmentId, CompetencyDefinitionId CompetencyDefinitionId, string Level, decimal? Score, string? Comment, Guid? EvaluatorAuthGateUserId, string? EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc) : ICommand<LearnerCompetencyDto>;
 public sealed record CreatePedagogicalTopicCommand(Guid ReferentialVersionId, int Number, string Title, string Category, int DurationMinutes, string? Reference, bool Active, string? Objective, string? Example, string? Correction) : ICommand<PedagogicalTopicDto>;
 public sealed record UpdatePedagogicalTopicCommand(Guid ReferentialVersionId, PedagogicalTopicId TopicId, int Number, string Title, string Category, int DurationMinutes, string? Reference, bool Active, string? Objective, string? Example, string? Correction) : ICommand<PedagogicalTopicDto>;
 public sealed record DeletePedagogicalTopicCommand(Guid ReferentialVersionId, PedagogicalTopicId TopicId) : ICommand<bool>;
+public sealed record ImportTpEcsr58TopicsCommand(Guid ReferentialVersionId) : ICommand<IReadOnlyCollection<PedagogicalTopicDto>>;
 public sealed record UpdateTopicProgressCommand(
     EnrollmentId EnrollmentId,
     PedagogicalTopicId TopicId,
@@ -101,5 +105,30 @@ public sealed class RecordDrivingEvaluationCommandValidator : AbstractValidator<
             c.RuleFor(x => x.Code).NotEmpty().MaximumLength(80);
             c.RuleFor(x => x.Level).NotEmpty();
         });
+    }
+}
+
+public sealed class CreateCompetencyDefinitionCommandValidator : AbstractValidator<CreateCompetencyDefinitionCommand>
+{
+    public CreateCompetencyDefinitionCommandValidator()
+    {
+        RuleFor(x => x.ReferentialVersionId).NotEqual(Guid.Empty);
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(80);
+        RuleFor(x => x.Title).NotEmpty().MaximumLength(300);
+        RuleFor(x => x.Kind).NotEmpty().MaximumLength(40);
+        RuleFor(x => x.SortOrder).GreaterThanOrEqualTo(0);
+    }
+}
+
+public sealed class UpdateCompetencyDefinitionCommandValidator : AbstractValidator<UpdateCompetencyDefinitionCommand>
+{
+    public UpdateCompetencyDefinitionCommandValidator()
+    {
+        RuleFor(x => x.ReferentialVersionId).NotEqual(Guid.Empty);
+        RuleFor(x => x.CompetencyDefinitionId).Must(x => !x.IsEmpty);
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(80);
+        RuleFor(x => x.Title).NotEmpty().MaximumLength(300);
+        RuleFor(x => x.Kind).NotEmpty().MaximumLength(40);
+        RuleFor(x => x.SortOrder).GreaterThanOrEqualTo(0);
     }
 }

@@ -11,6 +11,7 @@ using PedagoraPilot.Api.Middleware;
 using PedagoraPilot.Api.Readiness;
 using PedagoraPilot.Application;
 using PedagoraPilot.Application.Abstractions.Audit;
+using PedagoraPilot.Application.Abstractions.Storage;
 using PedagoraPilot.Application.Common.Realtime;
 using PedagoraPilot.Infrastructure;
 using PedagoraPilot.Infrastructure.Outbox;
@@ -35,7 +36,7 @@ try
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen();
     builder.Services.AddApplication();
-    builder.Services.AddInfrastructure(builder.Configuration);
+    builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
     builder.Services.AddPedagoraAuthentication(builder.Configuration);
     builder.Services.AddScoped<IAuditWriter, HttpAuditWriter>();
     builder.Services.Configure<IdempotencyOptions>(builder.Configuration.GetSection(IdempotencyOptions.SectionName));
@@ -57,6 +58,15 @@ try
         });
     });
     var app = builder.Build();
+
+    // Verify actual storage/scanner implementations before any database migration.
+    // Provider names in configuration alone do not prove production readiness.
+    ProductionDependencyGuard.Validate(
+        app.Environment,
+        app.Services.GetRequiredService<IOptions<ProductionReadinessOptions>>().Value,
+        app.Services.GetRequiredService<IObjectStorage>().GetType(),
+        app.Services.GetRequiredService<IFileSecurityScanner>().GetType());
+    await ProductionExternalDependencies.VerifyAsync(app.Services, app.Environment);
 
     MigrationManager.ApplyMigrations(app);
     await CatalogReferenceDataSeeder.SeedAsync(app.Services);

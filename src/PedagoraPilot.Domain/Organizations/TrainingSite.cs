@@ -71,6 +71,8 @@ public sealed class TrainingSite : AggregateRoot
         RaiseDomainEvent(new TrainingSiteUpdatedDomainEvent(Id, OrganizationId, Code.Value, Name));
     }
 
+    public void MarkDeleted() => RaiseDomainEvent(new TrainingSiteDeletedDomainEvent(Id, OrganizationId));
+
     public void Deactivate() { Status = TrainingSiteStatus.Inactive; UpdatedAtUtc = DateTime.UtcNow; }
     public void Activate() { Status = TrainingSiteStatus.Active; UpdatedAtUtc = DateTime.UtcNow; }
 

@@ -24,7 +24,7 @@ public sealed class OrganizationAdministrationTests
         organization.UpdateAdministration(
             " AFPA Nice Côte d'Azur ",
             " AFPA Nice ",
-            " 12345678901234 ",
+            " 12345678901237 ",
             " NDA-001 ",
             " 1 rue Test ",
             " 06000 ",
@@ -60,6 +60,7 @@ public sealed class OrganizationAdministrationTests
         organization.ShortName.Should().Be("AFPA Nice");
         organization.OwnerEmail.Should().Be("contact@example.com");
         organization.CountryCode.Should().Be("FR");
+        organization.Siret.Should().Be("12345678901237");
         organization.PrimaryColor.Should().Be("#ABCDEF");
         organization.Language.Should().Be("fr");
         organization.EnabledModules.Should().BeEquivalentTo(["documents", "planning"]);

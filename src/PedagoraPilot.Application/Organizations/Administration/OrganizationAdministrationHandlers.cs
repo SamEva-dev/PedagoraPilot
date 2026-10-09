@@ -67,7 +67,8 @@ public sealed class GetOrganizationAdministrationQueryHandler(
         x.SubscriptionPlan ?? string.Empty,
         x.SubscriptionStatus.ToString(),
         x.TrialEndsAtUtc,
-        x.BillingCustomerReference ?? string.Empty);
+        x.BillingCustomerReference ?? string.Empty,
+        x.Version);
 }
 
 public sealed class UpdateOrganizationAdministrationCommandHandler(
@@ -83,6 +84,10 @@ public sealed class UpdateOrganizationAdministrationCommandHandler(
         var organization = await organizations.GetByIdAsync(command.OrganizationId, true, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.OrganizationNotFound);
         var r = command.Request;
+        // ExpectedVersion is mandatory: do not silently accept old or stale full-document PUTs.
+        // EF Core also checks Organization.Version when committing concurrent transactions.
+        if (r.ExpectedVersion is null || r.ExpectedVersion.Value != organization.Version)
+            throw new ConflictApplicationException(ErrorKeys.ConcurrencyConflict);
         organization.UpdateAdministration(
             r.LegalName, r.ShortName, r.Siret, r.TrainingDeclarationNumber, r.Address, r.PostalCode,
             r.City, r.Country, r.Email, r.Phone, r.Website, r.ManagerName,

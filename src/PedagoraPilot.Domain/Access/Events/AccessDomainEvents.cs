@@ -7,3 +7,5 @@ public sealed record AccessInvitationCreatedDomainEvent(AccessInvitationId Invit
 public sealed record AccessInvitationAcceptedDomainEvent(AccessInvitationId InvitationId, Guid OrganizationId, Guid AuthGateUserId) : DomainEvent;
 
 public sealed record AccessMemberRoleChangedDomainEvent(Guid OrganizationId, Guid AuthGateUserId, string RoleCode) : DomainEvent;
+public sealed record AccessMemberStatusChangedDomainEvent(Guid OrganizationId, Guid AuthGateUserId, bool Active) : DomainEvent;
+public sealed record AccessMemberRevokedDomainEvent(Guid OrganizationId, Guid AuthGateUserId) : DomainEvent;

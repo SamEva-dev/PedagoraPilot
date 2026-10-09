@@ -33,19 +33,52 @@ public sealed class AttendanceEntry : Entity<AttendanceEntryId>
     public bool AddToCatchup { get; private set; }
     public string? Comment { get; private set; }
 
-    internal void Record(AttendanceStatus status, DateTimeOffset? arrivalAtUtc, DateTimeOffset? departureAtUtc, int? presentMinutes, bool addToCatchup, string? comment)
+    internal void Record(AttendanceStatus status, DateTimeOffset? arrivalAtUtc, DateTimeOffset? departureAtUtc, int? presentMinutes, bool addToCatchup, string? comment, DateTimeOffset? sessionStartsAtUtc = null, DateTimeOffset? sessionEndsAtUtc = null)
     {
-        if (arrivalAtUtc.HasValue && departureAtUtc.HasValue && departureAtUtc <= arrivalAtUtc)
-            throw new DomainException("ATTENDANCE_TIME_RANGE_INVALID");
-        var resolvedPresent = status switch
+        if (status is AttendanceStatus.Pending || !Enum.IsDefined(status))
+            throw new DomainException("ATTENDANCE_STATUS_INVALID");
+        if (arrivalAtUtc.HasValue != departureAtUtc.HasValue)
+            throw new DomainException("ATTENDANCE_TIME_PAIR_REQUIRED");
+        if (presentMinutes < 0 || presentMinutes > ExpectedMinutes)
+            throw new DomainException("ATTENDANCE_PRESENT_MINUTES_INVALID");
+        if (comment?.Trim().Length > 1000)
+            throw new DomainException("ATTENDANCE_COMMENT_TOO_LONG");
+
+        if (status == AttendanceStatus.Late && !arrivalAtUtc.HasValue)
+            throw new DomainException("ATTENDANCE_LATE_TIMES_REQUIRED");
+
+        var absent = status is AttendanceStatus.Absent or AttendanceStatus.Excused;
+        if (absent && (arrivalAtUtc.HasValue || departureAtUtc.HasValue || presentMinutes is > 0))
+            throw new DomainException("ATTENDANCE_ABSENCE_TIME_INVALID");
+
+        var resolvedPresent = absent ? 0 : presentMinutes ?? ExpectedMinutes;
+        if (arrivalAtUtc.HasValue && departureAtUtc.HasValue)
         {
-            AttendanceStatus.Absent or AttendanceStatus.Excused => 0,
-            _ => Math.Clamp(presentMinutes ?? ExpectedMinutes, 0, ExpectedMinutes)};
+            var arrival = arrivalAtUtc.Value.ToUniversalTime();
+            var departure = departureAtUtc.Value.ToUniversalTime();
+            if (departure <= arrival)
+                throw new DomainException("ATTENDANCE_TIME_RANGE_INVALID");
+            if (sessionStartsAtUtc.HasValue && sessionEndsAtUtc.HasValue &&
+                (arrival < sessionStartsAtUtc.Value.ToUniversalTime() || departure > sessionEndsAtUtc.Value.ToUniversalTime()))
+                throw new DomainException("ATTENDANCE_OUTSIDE_SESSION");
+            if (status == AttendanceStatus.Late && sessionStartsAtUtc.HasValue &&
+                arrival <= sessionStartsAtUtc.Value.ToUniversalTime())
+                throw new DomainException("ATTENDANCE_LATE_ARRIVAL_INVALID");
+            var minutes = checked((int)Math.Round((departure - arrival).TotalMinutes, MidpointRounding.AwayFromZero));
+            if (minutes <= 0 || minutes > ExpectedMinutes)
+                throw new DomainException("ATTENDANCE_PRESENT_MINUTES_INVALID");
+            if (presentMinutes.HasValue && Math.Abs(presentMinutes.Value - minutes) > 1)
+                throw new DomainException("ATTENDANCE_DURATION_MISMATCH");
+            resolvedPresent = minutes;
+        }
+        if (!absent && resolvedPresent <= 0)
+            throw new DomainException("ATTENDANCE_PRESENT_MINUTES_INVALID");
+
         Status = status;
         ArrivalAtUtc = arrivalAtUtc?.ToUniversalTime();
         DepartureAtUtc = departureAtUtc?.ToUniversalTime();
         PresentMinutes = resolvedPresent;
-        MissedMinutes = Math.Max(0, ExpectedMinutes - resolvedPresent);
+        MissedMinutes = ExpectedMinutes - resolvedPresent;
         AddToCatchup = addToCatchup && status != AttendanceStatus.Excused;
         CatchupMinutes = AddToCatchup ? MissedMinutes : 0;
         Comment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();

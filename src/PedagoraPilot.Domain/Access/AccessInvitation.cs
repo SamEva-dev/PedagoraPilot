@@ -53,6 +53,9 @@ public sealed class AccessInvitation : AggregateRoot<AccessInvitationId>
     public Guid? ProgramId { get; private set; }
     public Guid? CohortId { get; private set; }
     public Guid? ExamSessionId { get; private set; }
+    public string? Phone { get; private set; }
+    public DateOnly? BirthDate { get; private set; }
+    public DateOnly? EnrolledOn { get; private set; }
     public DateTime ExpiresAtUtc { get; private set; }
     public DateTime? AcceptedAtUtc { get; private set; }
     public DateTime? LastAttemptAtUtc { get; private set; }
@@ -63,7 +66,8 @@ public sealed class AccessInvitation : AggregateRoot<AccessInvitationId>
 
     public static (AccessInvitation Invitation, string Token) Create(Guid organizationId, string email, string firstName,
         string lastName, string requestedRole, Guid invitedByUserId, int expirationDays = 7,
-        Guid? siteId = null, Guid? programId = null, Guid? cohortId = null, Guid? examSessionId = null)
+        Guid? siteId = null, Guid? programId = null, Guid? cohortId = null, Guid? examSessionId = null,
+        string? phone = null, DateOnly? birthDate = null, DateOnly? enrolledOn = null)
     {
         if (organizationId == Guid.Empty) throw new DomainException("ACCESS_INVITATION_ORGANIZATION_REQUIRED");
         if (invitedByUserId == Guid.Empty) throw new DomainException("ACCESS_INVITATION_INVITER_REQUIRED");
@@ -78,7 +82,10 @@ public sealed class AccessInvitation : AggregateRoot<AccessInvitationId>
             SiteId = siteId,
             ProgramId = programId,
             CohortId = cohortId,
-            ExamSessionId = examSessionId
+            ExamSessionId = examSessionId,
+            Phone = string.IsNullOrWhiteSpace(phone) ? null : Normalize(phone, 40),
+            BirthDate = birthDate,
+            EnrolledOn = enrolledOn
         };
         entity.RaiseDomainEvent(new AccessInvitationCreatedDomainEvent(entity.Id, entity.OrganizationId, token));
         return (entity, token);

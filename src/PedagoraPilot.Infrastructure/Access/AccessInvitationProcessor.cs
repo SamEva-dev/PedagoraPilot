@@ -4,8 +4,10 @@ using Microsoft.Extensions.Hosting;
 using PedagoraPilot.Application.Abstractions.Identity;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Access.Invitations;
+using PedagoraPilot.Application.Access.Members;
 using PedagoraPilot.Domain.Access;
 using PedagoraPilot.Domain.Identifiers;
+using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Infrastructure.Access;
 
@@ -13,7 +15,9 @@ public sealed class AccessInvitationProcessor(
     IAccessInvitationRepository invitations,
     IApplicationIdentityAccess identity,
     IOrganizationMemberRepository members,
+    IStudentMemberProvisioner studentMembers,
     IUnitOfWork unitOfWork,
+    PedagoraPilot.Infrastructure.Persistence.PedagoraPilotDbContext db,
     IEmailingService emailing,
     IConfiguration configuration,
     IHostEnvironment environment) : IAccessInvitationProcessor
@@ -75,26 +79,44 @@ public sealed class AccessInvitationProcessor(
                 invitation.OrganizationId, invitation.Email, invitation.FirstName, invitation.LastName,
                 invitation.RequestedRole, password, emailConfirmed), ct);
 
-            var member = await members.GetByAuthGateUserAsync(invitation.OrganizationId, provisioned.UserId, true, ct);
-            if (member is null)
+            // Keep member, learner, enrollment and invitation acceptance in ONE local DB transaction.
+            // AuthGate is an external system and cannot participate in that transaction.
+            return await unitOfWork.ExecuteInTransactionAsync(async txCt =>
             {
-                member = OrganizationMember.Create(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName);
-                await members.AddAsync(member, ct);
-            }
-            else
-            {
-                member.SynchronizeIdentity(invitation.Email, invitation.FirstName, invitation.LastName, true);
-            }
-            await members.SyncRoleProfilesAsync(member, new[] { invitation.RequestedRole }, true, ct);
-            invitation.Accept(provisioned.UserId);
-            await unitOfWork.SaveChangesAsync(ct);
-            return provisioned.UserId;
+                var member = await members.GetByAuthGateUserAsync(invitation.OrganizationId, provisioned.UserId, true, txCt);
+                if (member is null)
+                {
+                    member = OrganizationMember.Create(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName);
+                    await members.AddAsync(member, txCt);
+                }
+                else
+                {
+                    member.SynchronizeIdentity(invitation.Email, invitation.FirstName, invitation.LastName, true);
+                }
+                await members.SyncRoleProfilesAsync(member, new[] { invitation.RequestedRole }, true, txCt);
+
+                if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
+                    await studentMembers.EnsureAsync(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName, invitation.CohortId, invitation.Phone, invitation.BirthDate, invitation.EnrolledOn, txCt);
+
+                invitation.Accept(provisioned.UserId);
+                await unitOfWork.SaveChangesAsync(txCt);
+                return provisioned.UserId;
+            }, ct);
         }
         catch (Exception ex)
         {
-            invitation.RecordRetryableFailure(ex.Message);
-            await unitOfWork.SaveChangesAsync(ct);
+            // A rolled-back transaction leaves EF entities tracked as if they had persisted.
+            // Detach them before recording retry state, or SaveChanges could commit an enrollment
+            // that failed the capacity/invitation transaction.
+            db.ChangeTracker.Clear();
+            var persistedInvitation = await invitations.GetByIdAsync(invitation.Id, true, ct);
+            if (persistedInvitation is not null)
+            {
+                persistedInvitation.RecordRetryableFailure(ex.Message);
+                await unitOfWork.SaveChangesAsync(ct);
+            }
             throw;
         }
     }
+
 }

@@ -8,6 +8,7 @@ public interface IOrganizationMemberRepository : IRepository<OrganizationMember,
     Task<OrganizationMember?> GetByAuthGateUserAsync(Guid organizationId, Guid authGateUserId, bool isTracking = false, CancellationToken cancellationToken = default);
     Task SyncRoleProfilesAsync(OrganizationMember member, IReadOnlyCollection<string> roles, bool active, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<MemberDirectoryEntry>> GetTrainerDirectoryAsync(Guid organizationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<MemberDirectoryEntry>> GetStudentDirectoryAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<string>> GetRoleCodesAsync(Guid organizationId, Guid authGateUserId, CancellationToken cancellationToken = default);
     Task<int> CountActiveRoleAsync(Guid organizationId, string roleCode, CancellationToken cancellationToken = default);
 }

@@ -45,7 +45,8 @@ public sealed record OrganizationAdministrationDto(
     string SubscriptionPlan,
     string SubscriptionStatus,
     DateTime? TrialEndsAtUtc,
-    string BillingCustomerReference);
+    string BillingCustomerReference,
+    uint Version);
 
 public sealed record UpdateOrganizationAdministrationRequest(
     string LegalName,
@@ -80,4 +81,5 @@ public sealed record UpdateOrganizationAdministrationRequest(
     bool RemoteWorkApprovalRequired,
     int RemoteWorkMaxDaysPerWeek,
     bool RemoteWorkHalfDayAllowed,
-    bool RemoteWorkEndOfDayReport);
+    bool RemoteWorkEndOfDayReport,
+    uint? ExpectedVersion);

@@ -7,6 +7,7 @@ namespace PedagoraPilot.Application.Catalog.Programs;
 public sealed record CreateProgramCommand(string FamilyCode, string Code, string Name, string DescriptionKey, string ReferenceVersion, string Icon, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules, string? ExternalKey) : ICommand<TrainingProgramDto>;
 public sealed record UpdateProgramCommand(Guid Id, string FamilyCode, string Name, string DescriptionKey, string ReferenceVersion, string Icon, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules) : ICommand<TrainingProgramDto>;
 public sealed record SetProgramOfferingCommand(Guid ProgramId, Guid SiteId, bool Active) : ICommand<ProgramOfferingDto>;
+public sealed record DeleteProgramCommand(Guid Id) : ICommand<bool>;
 public sealed class CreateProgramCommandValidator : AbstractValidator<CreateProgramCommand>
 {
     public CreateProgramCommandValidator()

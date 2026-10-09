@@ -15,4 +15,5 @@ public sealed record CreateCertificationExamSessionRequest(Guid CohortId, Guid S
 public sealed record AssignJuryRequest(Guid AuthGateUserId, string DisplayName, string Role);
 public sealed record EvaluateEligibilityRequest(bool Eligible, IReadOnlyCollection<string>? Blockers);
 public sealed record RecordCertificationAssessmentRequest(Guid StepDefinitionId, string JuryDisplayName, string Outcome, decimal? Score, string? Comment);
+public sealed record RecordCertificationAssessmentBatchRequest(IReadOnlyCollection<RecordCertificationAssessmentRequest>? Assessments, bool Finalize);
 public sealed record RecordCertificationDecisionRequest(string Decision, string? Comment);

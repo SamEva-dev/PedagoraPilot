@@ -20,6 +20,13 @@ public sealed class ProgramsController(IMediator mediator) : ControllerBase
         return Created($"/api/v1/programs/{x.Id}", x);
     }
 
+    [HttpDelete("{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Programs.Delete)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        await mediator.Send(new DeleteProgramCommand(id), ct);
+        return NoContent();
+    }
+
     [HttpPut("{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public Task<TrainingProgramDto> Update(Guid id, UpdateProgramRequest r, CancellationToken ct) => mediator.Send(new UpdateProgramCommand(id, r.FamilyCode, r.Name, r.DescriptionKey, r.EffectiveReferenceVersion, r.Icon, r.DurationHours, r.Status, r.EnabledModules), ct);
     

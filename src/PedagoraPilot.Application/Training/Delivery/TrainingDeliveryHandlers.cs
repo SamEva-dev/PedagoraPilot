@@ -78,7 +78,7 @@ internal static class TrainingDeliveryMapper
         _ => throw new ValidationApplicationException(ErrorKeys.AttendanceStatusInvalid)};
 }
 
-public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ITrainingSessionRepository sessions, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<CreateTrainingSessionCommand, TrainingSessionDto>
+public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ITrainingSessionRepository sessions, IOrganizationMemberRepository members, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<CreateTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CreateTrainingSessionCommand request, CancellationToken ct)
     {
@@ -90,7 +90,7 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
         await ValidateParticipantsAsync(cohort.Id, audienceMode, participantIds, enrollments, ct);
-        var trainer = VerifiedTrainer(currentUser, request.TrainerAuthGateUserId, request.TrainerDisplayName);
+        var trainer = await VerifiedTrainerAsync(currentUser, request.TrainerAuthGateUserId, request.TrainerDisplayName, members, cohort.OrganizationId, PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.AssignTrainer, ct);
         var entity = TrainingSession.Create(cohort.OrganizationId, cohort.SiteId, cohort.Id, TrainingDeliveryMapper.ParseType(request.Type), TrainingDeliveryMapper.ParseModality(request.Modality), request.Title, request.StartsAtUtc, request.EndsAtUtc, request.TimeZoneId, trainer.Id, trainer.Name, request.Location, request.Objective, request.Supports, request.Comments, audienceMode, participantIds, request.ExternalKey);
         await sessions.AddAsync(entity, ct);
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
@@ -112,25 +112,59 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
     {
         TenantScope.Ensure(currentUser, organizationId);
     }
-    internal static (string? Id, string? Name) VerifiedTrainer(ICurrentUser current, string? requestedId, string? requestedName)
+    internal static async Task<(string? Id, string? Name)> VerifiedTrainerAsync(
+        ICurrentUser current,
+        string? requestedId,
+        string? requestedName,
+        IOrganizationMemberRepository members,
+        Guid organizationId,
+        string assignPermission,
+        CancellationToken ct)
     {
         var ownId = current.UserId?.ToString("D");
-        if (!string.IsNullOrWhiteSpace(requestedId) && !string.Equals(requestedId, ownId, StringComparison.OrdinalIgnoreCase))
-            throw new ValidationApplicationException(ErrorKeys.SessionTrainerIdentityInvalid);
-        if (current.Roles.Contains("PedagoraPilot.Trainer") || current.Roles.Contains("PedagoraPilot.PedagogicalManager")
-            || !string.IsNullOrWhiteSpace(requestedId))
+        var normalizedRequestedId = string.IsNullOrWhiteSpace(requestedId) ? ownId : requestedId.Trim();
+
+        if (!current.HasPermission(assignPermission))
+        {
+            if (!string.Equals(normalizedRequestedId, ownId, StringComparison.OrdinalIgnoreCase))
+                throw new ValidationApplicationException(ErrorKeys.SessionTrainerIdentityInvalid);
             return (ownId, current.DisplayName ?? current.Email ?? ownId);
-        return (null, requestedName);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedRequestedId))
+            return (null, string.IsNullOrWhiteSpace(requestedName) ? null : requestedName.Trim());
+
+        if (!Guid.TryParse(normalizedRequestedId, out var trainerUserId))
+            throw new ValidationApplicationException(ErrorKeys.SessionTrainerIdentityInvalid);
+
+        var directory = await members.GetTrainerDirectoryAsync(organizationId, ct);
+        var trainer = directory.FirstOrDefault(x => x.AuthGateUserId == trainerUserId);
+        if (trainer is null)
+            throw new ValidationApplicationException(ErrorKeys.SessionTrainerIdentityInvalid);
+
+        return (trainer.AuthGateUserId.ToString("D"), trainer.DisplayName);
     }
+
+    internal static void EnsureTrainerCanView(TrainingSession session, ICurrentUser current)
+    {
+        if (current.Roles.Contains("PedagoraPilot.Trainer")
+            && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.ViewOthers)
+            && !string.IsNullOrWhiteSpace(session.TrainerAuthGateUserId)
+            && !string.Equals(session.TrainerAuthGateUserId, current.UserId?.ToString("D"), StringComparison.OrdinalIgnoreCase))
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+    }
+
     internal static void EnsureTrainerCanManage(TrainingSession session, ICurrentUser current)
     {
-        if (current.Roles.Contains("PedagoraPilot.Trainer") && !string.IsNullOrWhiteSpace(session.TrainerAuthGateUserId)
+        if (current.Roles.Contains("PedagoraPilot.Trainer")
+            && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.AssignTrainer)
+            && !string.IsNullOrWhiteSpace(session.TrainerAuthGateUserId)
             && !string.Equals(session.TrainerAuthGateUserId, current.UserId?.ToString("D"), StringComparison.OrdinalIgnoreCase))
             throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
     }
 }
 
-public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<UpdateTrainingSessionCommand, TrainingSessionDto>
+public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IOrganizationMemberRepository members, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments) : IRequestHandler<UpdateTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(UpdateTrainingSessionCommand request, CancellationToken ct)
     {
@@ -141,7 +175,7 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
         await CreateTrainingSessionCommandHandler.ValidateParticipantsAsync(entity.CohortId, audienceMode, participantIds, enrollments, ct);
-        var trainer = CreateTrainingSessionCommandHandler.VerifiedTrainer(currentUser, request.TrainerAuthGateUserId, request.TrainerDisplayName);
+        var trainer = await CreateTrainingSessionCommandHandler.VerifiedTrainerAsync(currentUser, request.TrainerAuthGateUserId, request.TrainerDisplayName, members, entity.OrganizationId, PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.AssignTrainer, ct);
         entity.Update(TrainingDeliveryMapper.ParseType(request.Type), TrainingDeliveryMapper.ParseModality(request.Modality), request.Title, request.StartsAtUtc, request.EndsAtUtc, request.TimeZoneId, trainer.Id, trainer.Name, request.Location, request.Objective, request.Supports, request.Comments, audienceMode, participantIds);
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);
@@ -184,6 +218,16 @@ public sealed class GetTrainingSessionsQueryHandler(ITrainingSessionRepository s
         var organizationId = TenantScope.Organization(currentUser);
         if (organizationId.HasValue)
             query = query.Where(x => x.OrganizationId == organizationId.Value);
+
+        if (currentUser.Roles.Contains("PedagoraPilot.Trainer")
+            && !currentUser.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.ViewOthers))
+        {
+            var trainerId = currentUser.UserId?.ToString("D");
+            if (string.IsNullOrWhiteSpace(trainerId))
+                return Array.Empty<TrainingSessionDto>();
+            query = query.Where(x => x.TrainerAuthGateUserId == trainerId);
+        }
+
         Enrollment[] own = Array.Empty<Enrollment>();
         if (LearnerSelfAccess.Applies(currentUser))
         {
@@ -247,6 +291,7 @@ public sealed class GetTrainingSessionQueryHandler(ITrainingSessionRepository se
         var entity = await sessions.GetByIdAsync(request.Id, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: false, ct);
+        CreateTrainingSessionCommandHandler.EnsureTrainerCanView(entity, currentUser);
         EnrollmentId? self = null;
         if (LearnerSelfAccess.Applies(currentUser))
             self = StudentSessionAccess.EnsureParticipant(entity,
@@ -271,6 +316,7 @@ public sealed class GetAttendanceSheetQueryHandler(ITrainingSessionRepository se
         var session = await sessions.GetByIdAsync(request.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(session.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(session, cohorts, offerings, currentUser, manage: false, ct);
+        CreateTrainingSessionCommandHandler.EnsureTrainerCanView(session, currentUser);
         EnrollmentId? self = null;
         if (LearnerSelfAccess.Applies(currentUser))
             self = StudentSessionAccess.EnsureParticipant(session,
@@ -288,9 +334,17 @@ public sealed class GetAttendanceSheetQueryHandler(ITrainingSessionRepository se
 
     internal static async Task<EnrollmentId[]> ResolveEligibleEnrollmentIdsAsync(TrainingSession session, IEnrollmentRepository enrollments, CancellationToken ct)
     {
+        // Active membership is checked again at the time of marking attendance.
+        // Selecting a learner when scheduling a session does not grant permanent eligibility.
+        var query = enrollments.Query(false).Where(x =>
+            x.OrganizationId == session.OrganizationId &&
+            x.CohortId == session.CohortId && x.Status == EnrollmentStatus.Active);
         if (session.AudienceMode == SessionAudienceMode.SelectedEnrollments)
-            return session.Participants.Select(x => x.EnrollmentId).Distinct().ToArray();
-        return await enrollments.Query(false).Where(x => x.CohortId == session.CohortId && x.Status == EnrollmentStatus.Active).Select(x => x.Id).ToArrayAsync(ct);
+        {
+            var selected = session.Participants.Select(x => x.EnrollmentId).Distinct().ToArray();
+            query = query.Where(x => selected.Contains(x.Id));
+        }
+        return await query.Select(x => x.Id).ToArrayAsync(ct);
     }
 
     internal static async Task<AttendanceSheetDto> BuildAttendanceDto(AttendanceSheet sheet, IEnrollmentRepository enrollments, ILearnerProfileRepository learners, IPersonRepository people, IObjectMapper mapper, CancellationToken ct, EnrollmentId? onlyEnrollmentId = null)
@@ -332,10 +386,12 @@ public sealed class SaveAttendanceCommandHandler(ITrainingSessionRepository sess
         var session = await sessions.GetByIdAsync(request.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.SessionNotFound);
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(session.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(session, cohorts, offerings, currentUser, manage: true, ct);
+        CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(session, currentUser);
         if (session.Status == TrainingSessionStatus.Cancelled)
             throw new ConflictApplicationException(ErrorKeys.SessionCancelled);
-        var sheet = await sheets.GetBySessionIdAsync(session.Id, true, ct);
         var active = await GetAttendanceSheetQueryHandler.ResolveEligibleEnrollmentIdsAsync(session, enrollments, ct);
+        var allowed = active.ToHashSet();
+        var sheet = await sheets.GetBySessionIdAsync(session.Id, true, ct);
         if (sheet is null)
         {
             sheet = AttendanceSheet.Create(session.OrganizationId, session.Id, session.CohortId, session.PlannedMinutes, active);
@@ -350,9 +406,15 @@ public sealed class SaveAttendanceCommandHandler(ITrainingSessionRepository sess
         {
             var enrollmentId = new EnrollmentId(update.EnrollmentId);
             var enrollment = await enrollments.GetByIdAsync(enrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
-            if (enrollment.CohortId != session.CohortId)
+            if (enrollment.OrganizationId != session.OrganizationId || enrollment.CohortId != session.CohortId)
                 throw new ConflictApplicationException(ErrorKeys.AttendanceEnrollmentCohortMismatch);
-            sheet.Record(enrollmentId, TrainingDeliveryMapper.ParseAttendanceStatus(update.Status), update.ArrivalAtUtc, update.DepartureAtUtc, update.PresentMinutes, update.AddToCatchup, update.Comment);
+            // A valid cohort enrollment is not sufficient: the learner must be eligible
+            // for this particular session (selected audience or active whole cohort).
+            if (!allowed.Contains(enrollmentId))
+                throw new ConflictApplicationException(ErrorKeys.AttendanceEnrollmentNotEligible);
+            sheet.Record(enrollmentId, TrainingDeliveryMapper.ParseAttendanceStatus(update.Status),
+                update.ArrivalAtUtc, update.DepartureAtUtc, update.PresentMinutes, update.AddToCatchup,
+                update.Comment, session.StartsAtUtc, session.EndsAtUtc);
         }
 
         sheet.MarkRecorded();

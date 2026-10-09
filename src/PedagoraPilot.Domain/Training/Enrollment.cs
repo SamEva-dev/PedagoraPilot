@@ -45,12 +45,42 @@ public sealed class Enrollment : AggregateRoot<EnrollmentId>
         return enrollment;
     }
 
+    /// <summary>
+    /// The same enrollment cannot be resurrected after cancellation, withdrawal or completion.
+    /// Re-enrollment is a separate business process and requires an explicit decision.
+    /// </summary>
     public void ChangeStatus(EnrollmentStatus status, DateOnly? endedOn = null)
     {
-        if (Status == EnrollmentStatus.Completed && status != EnrollmentStatus.Completed)
-            throw new DomainException("ENROLLMENT_COMPLETED_LOCKED");
+        if (!Enum.IsDefined(status))
+            throw new DomainException("ENROLLMENT_STATUS_INVALID");
+
+        if (Status == status)
+        {
+            if (endedOn.HasValue && endedOn != EndedOn)
+                throw new DomainException("ENROLLMENT_END_DATE_CHANGE_FORBIDDEN");
+            return;
+        }
+
+        var allowed = Status switch
+        {
+            EnrollmentStatus.Pending => status is EnrollmentStatus.Active or EnrollmentStatus.Cancelled,
+            EnrollmentStatus.Active => status is EnrollmentStatus.Suspended or EnrollmentStatus.Completed or EnrollmentStatus.Withdrawn or EnrollmentStatus.Cancelled,
+            EnrollmentStatus.Suspended => status is EnrollmentStatus.Active or EnrollmentStatus.Completed or EnrollmentStatus.Withdrawn,
+            _ => false
+        };
+        if (!allowed)
+            throw new DomainException("ENROLLMENT_STATUS_TRANSITION_FORBIDDEN");
+
+        var closesEnrollment = status is EnrollmentStatus.Completed or EnrollmentStatus.Withdrawn or EnrollmentStatus.Cancelled;
+        if (!closesEnrollment && endedOn.HasValue)
+            throw new DomainException("ENROLLMENT_END_DATE_ONLY_FOR_CLOSURE");
+
+        var closureDate = closesEnrollment ? endedOn ?? DateOnly.FromDateTime(DateTime.UtcNow) : DateOnly.MinValue;
+        if (status == EnrollmentStatus.Completed && closureDate != DateOnly.MinValue && closureDate < EnrolledOn)
+            throw new DomainException("ENROLLMENT_END_DATE_BEFORE_START");
+
         Status = status;
-        EndedOn = status is EnrollmentStatus.Completed or EnrollmentStatus.Withdrawn or EnrollmentStatus.Cancelled ? endedOn ?? DateOnly.FromDateTime(DateTime.UtcNow) : null;
+        EndedOn = closesEnrollment ? closureDate : null;
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new EnrollmentStatusChangedDomainEvent(Id, OrganizationId, status));
     }

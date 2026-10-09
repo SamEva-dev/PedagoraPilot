@@ -23,7 +23,8 @@ public enum CertificationCandidateStatus
     Ineligible = 2,
     InProgress = 3,
     Completed = 4,
-    Published = 5
+    Published = 5,
+    AssessmentsValidated = 6
 }
 
 public enum CertificationDecision

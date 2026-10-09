@@ -37,6 +37,19 @@ public sealed class CompetencyDefinition : AggregateRoot<CompetencyDefinitionId>
     public long Version { get; private set; }
 
     public static CompetencyDefinition Create(Guid referentialVersionId, CompetencyDefinitionId? parentId, string code, string title, CompetencyKind kind, int sortOrder, bool active = true, string? externalKey = null) => new(CompetencyDefinitionId.New(), referentialVersionId, parentId, code, title, kind, sortOrder, active, externalKey);
+    public void Update(CompetencyDefinitionId? parentId, string code, string title, CompetencyKind kind, int sortOrder, bool active)
+    {
+        if (parentId.HasValue && parentId.Value == Id)
+            throw new DomainException("COMPETENCY_PARENT_INVALID");
+        ParentId = parentId;
+        Code = NormalizeRequired(code, "COMPETENCY_CODE_REQUIRED", 80).ToUpperInvariant();
+        Title = NormalizeRequired(title, "COMPETENCY_TITLE_REQUIRED", 300);
+        Kind = kind;
+        SortOrder = sortOrder;
+        Active = active;
+        UpdatedAtUtc = DateTime.UtcNow;
+        Version++;
+    }
     private static string NormalizeRequired(string value, string key, int max)
     {
         if (string.IsNullOrWhiteSpace(value))

@@ -10,6 +10,7 @@ using PedagoraPilot.Domain.Common;
 using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Learning;
 using PedagoraPilot.Domain.Workplace;
+using PedagoraPilot.Domain.Training;
 
 namespace PedagoraPilot.Application.Workplace;
 internal static class WorkplaceDtoFactory
@@ -182,6 +183,12 @@ public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository en
     {
         var e = await enrollments.GetByIdAsync(r.EnrollmentId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.EnrollmentNotFound);
         var c = await cohorts.GetByIdAsync(e.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        if (e.OrganizationId != c.OrganizationId)
+            throw new ConflictApplicationException(ErrorKeys.WorkplaceEnrollmentCohortMismatch);
+        // A finished training may need its internship recorded retrospectively.
+        // A withdrawn, cancelled, pending or suspended enrollment cannot start a new placement.
+        if (e.Status is not (EnrollmentStatus.Active or EnrollmentStatus.Completed))
+            throw new ConflictApplicationException(ErrorKeys.WorkplaceEnrollmentNotEligible);
         if (TenantScope.Organization(current) is Guid scopeId && e.OrganizationId != scopeId)
             throw new ForbiddenApplicationException(ErrorKeys.WorkplaceForbidden);
         await ContextualScope.EnsureCanManageCohortAsync(current, c, offerings, ct);

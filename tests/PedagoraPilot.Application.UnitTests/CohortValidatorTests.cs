@@ -9,7 +9,7 @@ public sealed class CohortValidatorTests
     public async Task Create_validator_accepts_valid_command()
     {
         var command = new CreateCohortCommand(Guid.NewGuid(), Guid.NewGuid(), "ECSR-2026", "TP ECSR", 
-            new DateOnly(2026, 9, 1), new DateOnly(2027, 2, 28), 20, null, "", "");
+            new DateOnly(2026, 9, 1), new DateOnly(2027, 2, 28), 20, Guid.NewGuid(), "Formateur", "");
         var result = await new CreateCohortCommandValidator().ValidateAsync(command);
         result.IsValid.Should().BeTrue();
     }

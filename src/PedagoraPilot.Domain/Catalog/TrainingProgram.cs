@@ -10,7 +10,7 @@ public sealed class TrainingProgram : AggregateRoot
     {
     }
 
-    private TrainingProgram(Guid id, Guid? organizationId, Guid familyId, ProgramCode code, string name, string descriptionKey, string icon, int durationHours, string? externalKey) : base(id)
+    private TrainingProgram(Guid id, Guid? organizationId, Guid familyId, ProgramCode code, string name, string descriptionKey, string icon, int durationHours, string? externalKey, Guid? responsibleTrainerAuthGateUserId, string? responsibleTrainerDisplayName) : base(id)
     {
         OrganizationId = organizationId;
         FamilyId = familyId;
@@ -20,6 +20,8 @@ public sealed class TrainingProgram : AggregateRoot
         Icon = icon.Trim();
         DurationHours = durationHours;
         ExternalKey = externalKey;
+        ResponsibleTrainerAuthGateUserId = responsibleTrainerAuthGateUserId;
+        ResponsibleTrainerDisplayName = NormalizeOptional(responsibleTrainerDisplayName);
         Status = ProgramStatus.Active;
         CreatedAtUtc = UpdatedAtUtc = DateTime.UtcNow;
         Version = 1;
@@ -34,22 +36,29 @@ public sealed class TrainingProgram : AggregateRoot
     public int DurationHours { get; private set; }
     public ProgramStatus Status { get; private set; }
     public string? ExternalKey { get; private set; }
+    public Guid? ResponsibleTrainerAuthGateUserId { get; private set; }
+    public string? ResponsibleTrainerDisplayName { get; private set; }
     public IReadOnlyCollection<string> Capabilities => _capabilities.AsReadOnly();
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public long Version { get; private set; }
 
-    public static TrainingProgram Create(Guid familyId, string code, string name, string descriptionKey, string icon, int durationHours, IEnumerable<string> capabilities, string? externalKey = null, Guid? organizationId = null)
+    public static TrainingProgram Create(Guid familyId, string code, string name, string descriptionKey, string icon, int durationHours, IEnumerable<string> capabilities, string? externalKey = null, Guid? organizationId = null, Guid? responsibleTrainerAuthGateUserId = null, string? responsibleTrainerDisplayName = null)
     {
         if (durationHours <= 0)
             throw new DomainException("PROGRAM_DURATION_INVALID");
-        var x = new TrainingProgram(Guid.NewGuid(), organizationId, familyId, ProgramCode.Create(code), name, descriptionKey, icon, durationHours, externalKey);
+        var x = new TrainingProgram(Guid.NewGuid(), organizationId, familyId, ProgramCode.Create(code), name, descriptionKey, icon, durationHours, externalKey, responsibleTrainerAuthGateUserId, responsibleTrainerDisplayName);
         x.ReplaceCapabilities(capabilities);
         x.RaiseDomainEvent(new TrainingProgramCreatedDomainEvent(x.Id));
         return x;
     }
 
+    // Backward-compatible overload: existing callers that do not edit the responsible trainer
+    // keep the current assignment instead of being forced to pass the new fields.
     public void Update(Guid familyId, string name, string descriptionKey, string icon, int durationHours, ProgramStatus status, IEnumerable<string> capabilities)
+        => Update(familyId, name, descriptionKey, icon, durationHours, status, capabilities, ResponsibleTrainerAuthGateUserId, ResponsibleTrainerDisplayName);
+
+    public void Update(Guid familyId, string name, string descriptionKey, string icon, int durationHours, ProgramStatus status, IEnumerable<string> capabilities, Guid? responsibleTrainerAuthGateUserId, string? responsibleTrainerDisplayName)
     {
         if (durationHours <= 0)
             throw new DomainException("PROGRAM_DURATION_INVALID");
@@ -59,9 +68,31 @@ public sealed class TrainingProgram : AggregateRoot
         Icon = icon.Trim();
         DurationHours = durationHours;
         Status = status;
+        ResponsibleTrainerAuthGateUserId = responsibleTrainerAuthGateUserId;
+        ResponsibleTrainerDisplayName = NormalizeOptional(responsibleTrainerDisplayName);
         ReplaceCapabilities(capabilities);
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new TrainingProgramUpdatedDomainEvent(Id));
+    }
+
+    public void AssignResponsibleTrainer(Guid authGateUserId, string displayName)
+    {
+        if (authGateUserId == Guid.Empty)
+            throw new DomainException("PROGRAM_RESPONSIBLE_TRAINER_INVALID");
+
+        ResponsibleTrainerAuthGateUserId = authGateUserId;
+        ResponsibleTrainerDisplayName = NormalizeOptional(displayName);
+        UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new TrainingProgramUpdatedDomainEvent(Id));
+    }
+
+    public void MarkDeleted() => RaiseDomainEvent(new TrainingProgramDeletedDomainEvent(Id, OrganizationId));
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var text = (value ?? string.Empty).Trim();
+        if (text.Length == 0) return null;
+        return text.Length <= 220 ? text : text[..220];
     }
 
     private void ReplaceCapabilities(IEnumerable<string> values)

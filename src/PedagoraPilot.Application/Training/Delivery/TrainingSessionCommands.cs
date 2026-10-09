@@ -42,12 +42,17 @@ public sealed class SaveAttendanceCommandValidator : AbstractValidator<SaveAtten
     public SaveAttendanceCommandValidator()
     {
         RuleFor(x => x.SessionId).Must(x => !x.IsEmpty);
-        RuleFor(x => x.Entries).NotNull();
+        RuleFor(x => x.Entries).NotEmpty().WithErrorCode("ATTENDANCE_NO_ENTRIES");
+        RuleFor(x => x.Entries).Must(entries => entries is not null &&
+            entries.Select(x => x.EnrollmentId).Distinct().Count() == entries.Count)
+            .WithMessage("ATTENDANCE_DUPLICATE_ENROLLMENT")
+            .WithErrorCode("ATTENDANCE_DUPLICATE_ENROLLMENT");
         RuleForEach(x => x.Entries).ChildRules(entry =>
         {
             entry.RuleFor(x => x.EnrollmentId).NotEmpty();
             entry.RuleFor(x => x.Status).NotEmpty();
             entry.RuleFor(x => x.PresentMinutes).GreaterThanOrEqualTo(0).When(x => x.PresentMinutes.HasValue);
+            entry.RuleFor(x => x.Comment).MaximumLength(1000).WithErrorCode("ATTENDANCE_COMMENT_TOO_LONG");
         });
     }
 }

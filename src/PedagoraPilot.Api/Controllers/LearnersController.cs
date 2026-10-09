@@ -11,6 +11,8 @@ namespace PedagoraPilot.Api.Controllers;
 [ApiController, Route("api/v1/learners"), Authorize]
 public sealed class LearnersController(IMediator mediator) : ControllerBase
 {
+    [HttpGet, HasPermission(PedagoraPilotPermissionCodes.Learners.View)]
+    public Task<IReadOnlyCollection<LearnerDirectoryDto>> GetDirectory(CancellationToken ct) => mediator.Send(new GetLearnerDirectoryQuery(), ct);
     [HttpGet("me"), HasPermission(PedagoraPilotPermissionCodes.Learners.DetailView)]
     public Task<LearnerDto> GetSelf(CancellationToken ct) => mediator.Send(new GetSelfLearnerQuery(), ct);
     [HttpGet("{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Learners.DetailView)]

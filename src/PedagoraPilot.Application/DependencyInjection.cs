@@ -14,6 +14,7 @@ using PedagoraPilot.Application.Catalog.Programs;
 using PedagoraPilot.Application.Catalog.Referentials;
 using PedagoraPilot.Application.Training.Cohorts;
 using PedagoraPilot.Application.Training.Learners;
+using PedagoraPilot.Application.Access.Invitations;
 using PedagoraPilot.Application.Learning.Progress;
 using PedagoraPilot.Application.Workplace;
 using PedagoraPilot.Application.Documents;
@@ -58,7 +59,9 @@ public static class DependencyInjection
         services.AddTransient<IValidator<CreateReferentialVersionCommand>, CreateReferentialVersionCommandValidator>();
         services.AddTransient<IValidator<CreateCohortCommand>, CreateCohortCommandValidator>();
         services.AddTransient<IValidator<UpdateCohortCommand>, UpdateCohortCommandValidator>();
+        services.AddTransient<IValidator<ReassignCohortManagerCommand>, ReassignCohortManagerCommandValidator>();
         services.AddTransient<IValidator<EnrollLearnerCommand>, EnrollLearnerCommandValidator>();
+        services.AddTransient<IValidator<CreateAccessInvitationCommand>, CreateAccessInvitationCommandValidator>();
         services.AddTransient<IValidator<CreateTrainingSessionCommand>, CreateTrainingSessionCommandValidator>();
         services.AddTransient<IValidator<UpdateTrainingSessionCommand>, UpdateTrainingSessionCommandValidator>();
         services.AddTransient<IValidator<SaveAttendanceCommand>, SaveAttendanceCommandValidator>();

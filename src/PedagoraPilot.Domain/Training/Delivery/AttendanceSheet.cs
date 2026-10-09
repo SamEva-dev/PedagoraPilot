@@ -62,15 +62,16 @@ public sealed class AttendanceSheet : AggregateRoot<AttendanceSheetId>
         UpdatedAtUtc = DateTime.UtcNow;
     }
 
-    public void Record(EnrollmentId enrollmentId, AttendanceStatus status, DateTimeOffset? arrivalAtUtc, DateTimeOffset? departureAtUtc, int? presentMinutes, bool addToCatchup, string? comment)
+    public void Record(EnrollmentId enrollmentId, AttendanceStatus status, DateTimeOffset? arrivalAtUtc, DateTimeOffset? departureAtUtc, int? presentMinutes, bool addToCatchup, string? comment, DateTimeOffset? sessionStartsAtUtc = null, DateTimeOffset? sessionEndsAtUtc = null)
     {
         var entry = _entries.SingleOrDefault(x => x.EnrollmentId == enrollmentId) ?? throw new DomainException("ATTENDANCE_ENTRY_NOT_FOUND");
-        entry.Record(status, arrivalAtUtc, departureAtUtc, presentMinutes, addToCatchup, comment);
+        entry.Record(status, arrivalAtUtc, departureAtUtc, presentMinutes, addToCatchup, comment, sessionStartsAtUtc, sessionEndsAtUtc);
         UpdatedAtUtc = DateTime.UtcNow;
     }
 
     public void MarkRecorded()
     {
+        Version++;
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new AttendanceRecordedDomainEvent(Id, SessionId, OrganizationId));
     }

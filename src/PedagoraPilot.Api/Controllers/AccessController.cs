@@ -9,6 +9,7 @@ using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Abstractions.Identity;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Application.Access.Invitations;
+using PedagoraPilot.Application.Access.Assignments;
 using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Api.Controllers;
@@ -23,6 +24,7 @@ public sealed class AccessController(
     IConfiguration configuration,
     IOrganizationMemberRepository members,
     IAccessInvitationRepository invitations,
+    IUserBusinessAssignmentService businessAssignments,
     IApplicationIdentityAccess identityAccess,
     IUnitOfWork unitOfWork,
     ICurrentUser current,
@@ -32,6 +34,7 @@ public sealed class AccessController(
     public async Task<IActionResult> List(CancellationToken ct)
     {
         if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();
+        var localAssignments = await businessAssignments.ListForOrganizationAsync(current.OrganizationId.Value, ct);
 
         // During the migration of access administration, active membership details still come from
         // AuthGate. Pedagora invitations are stripped from that response and replaced by the product-owned
@@ -67,6 +70,14 @@ public sealed class AccessController(
                         if (productRoles.Count > 0)
                             node["roles"] = JsonSerializer.SerializeToNode(productRoles);
                     }
+
+                    // Business assignments belong to PedagoraPilot. Never expose AuthGate scope
+                    // assignments in this product-facing list.
+                    node["assignments"] = JsonSerializer.SerializeToNode(
+                        localAssignments.TryGetValue(authGateUserId, out var assignments)
+                            ? assignments
+                            : Array.Empty<UserBusinessAssignmentDto>(),
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web));
                 }
 
                 items.Add(node);
@@ -81,6 +92,7 @@ public sealed class AccessController(
             firstName = x.FirstName,
             lastName = x.LastName,
             status = "Invited",
+            primaryRole = x.RequestedRole,
             roles = new[] { x.RequestedRole },
             permissions = Array.Empty<object>(),
             assignments = Array.Empty<object>(),
@@ -116,13 +128,15 @@ public sealed class AccessController(
     }
 
     public sealed record InviteRequest(string FirstName, string LastName, string Email, string Role,
-        Guid? SiteId, Guid? ProgramId, Guid? CohortId, Guid? ExamSessionId);
+        Guid? SiteId, Guid? ProgramId, Guid? CohortId, Guid? ExamSessionId,
+        string? Phone = null, DateOnly? BirthDate = null, DateOnly? EnrolledOn = null);
 
     [HttpPost("invite"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
     public async Task<IActionResult> Invite([FromBody] InviteRequest body, CancellationToken ct)
     {
         var result = await mediator.Send(new CreateAccessInvitationCommand(body.FirstName, body.LastName, body.Email, body.Role,
-            body.SiteId, body.ProgramId, body.CohortId, body.ExamSessionId), ct);
+            body.SiteId, body.ProgramId, body.CohortId, body.ExamSessionId,
+            body.Phone, body.BirthDate, body.EnrolledOn), ct);
         return Ok(new { id = result.Id, result.Email, result.FirstName, result.LastName, role = result.Role, status = result.Status });
     }
 
@@ -178,20 +192,114 @@ public sealed class AccessController(
     [HttpPost("ownership/transfer"), HasPermission(PedagoraPilotPermissionCodes.Organization.OwnershipTransfer)]
     public Task<IActionResult> TransferOwnership([FromBody] JsonElement body, CancellationToken ct) => ForwardAsync(HttpMethod.Post, "/api/pedagora/access/ownership/transfer", body, ct);
 
+    public sealed record SetStatusRequest(bool Active);
+
     [HttpPut("{userId:guid}/status"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
-    public Task<IActionResult> SetStatus(Guid userId, [FromBody] JsonElement body, CancellationToken ct) => ForwardAsync(HttpMethod.Put, $"/api/pedagora/access/{userId:D}/status", body, ct);
+    public async Task<IActionResult> SetStatus(Guid userId, [FromBody] SetStatusRequest body, CancellationToken ct)
+    {
+        if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();
+        if (!current.UserId.HasValue || current.UserId.Value == Guid.Empty) return Forbid();
+        if (userId == current.UserId.Value) return BadRequest(new { error = "cannot_change_own_access" });
+
+        var member = await members.GetByAuthGateUserAsync(current.OrganizationId.Value, userId, true, ct);
+        if (member is null) return NotFound(new { error = "member_not_found" });
+
+        // Capture the canonical role before AuthGate changes the membership status. A suspended
+        // Pedagora profile has inactive role rows, so the local projection alone cannot restore
+        // the role on reactivation.
+        var snapshot = await GetAuthGateMemberSnapshotAsync(userId, ct);
+        if (snapshot is null) return NotFound(new { error = "membership_not_found" });
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new { active = body.Active }));
+        var raw = await ForwardRawAsync(HttpMethod.Put, $"/api/pedagora/access/{userId:D}/status", json.RootElement, ct);
+        if (!raw.IsSuccessStatusCode)
+            return new ContentResult { StatusCode = (int)raw.StatusCode, Content = raw.Content, ContentType = raw.ContentType };
+
+        member.SynchronizeIdentity(snapshot.Email, snapshot.FirstName, snapshot.LastName, body.Active);
+        await members.SyncRoleProfilesAsync(member, new[] { snapshot.PrimaryRole }, body.Active, ct);
+        member.RegisterStatusChange(body.Active);
+        await unitOfWork.SaveChangesAsync(ct);
+        return NoContent();
+    }
 
     [HttpDelete("{userId:guid}"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
-    public Task<IActionResult> Revoke(Guid userId, CancellationToken ct) => ForwardAsync(HttpMethod.Delete, $"/api/pedagora/access/{userId:D}", null, ct);
+    public async Task<IActionResult> Revoke(Guid userId, CancellationToken ct)
+    {
+        if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();
+        if (!current.UserId.HasValue || current.UserId.Value == Guid.Empty) return Forbid();
+        if (userId == current.UserId.Value) return BadRequest(new { error = "cannot_revoke_own_access" });
+
+        var member = await members.GetByAuthGateUserAsync(current.OrganizationId.Value, userId, true, ct);
+        if (member is null) return NotFound(new { error = "member_not_found" });
+
+        var raw = await ForwardRawAsync(HttpMethod.Delete, $"/api/pedagora/access/{userId:D}", null, ct);
+        if (!raw.IsSuccessStatusCode)
+            return new ContentResult { StatusCode = (int)raw.StatusCode, Content = raw.Content, ContentType = raw.ContentType };
+
+        // Revoke immediately in the product projection. AuthGate's SyncPedagoraMember outbox is
+        // retained as a reconciliation mechanism, but the UI and business directories no longer
+        // wait for that asynchronous message to become consistent.
+        member.SynchronizeIdentity(member.Email, member.FirstName, member.LastName, false);
+        await members.SyncRoleProfilesAsync(member, Array.Empty<string>(), false, ct);
+        member.RegisterRevoked();
+        await unitOfWork.SaveChangesAsync(ct);
+        return NoContent();
+    }
 
     [HttpPut("{userId:guid}/permissions/{key}"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
     public Task<IActionResult> SetPermission(Guid userId, string key, [FromBody] JsonElement body, CancellationToken ct) => ForwardAsync(HttpMethod.Put, $"/api/pedagora/access/{userId:D}/permissions/{Uri.EscapeDataString(key)}", body, ct);
 
+    public sealed record AddBusinessAssignmentRequest(string Role, Guid CohortId, bool MakePedagogicalManager = false);
+
     [HttpPost("{userId:guid}/assignments"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
-    public Task<IActionResult> AddAssignment(Guid userId, [FromBody] JsonElement body, CancellationToken ct) => ForwardAsync(HttpMethod.Post, $"/api/pedagora/access/{userId:D}/assignments", body, ct);
+    public async Task<IActionResult> AddAssignment(Guid userId, [FromBody] AddBusinessAssignmentRequest body, CancellationToken ct)
+    {
+        if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();
+        if (body.CohortId == Guid.Empty) return BadRequest(new { error = "cohort_required" });
+        var result = await businessAssignments.AddAsync(current.OrganizationId.Value, userId, body.CohortId, body.Role, body.MakePedagogicalManager, ct);
+        return Ok(result);
+    }
 
     [HttpDelete("{userId:guid}/assignments/{assignmentId:guid}"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
-    public Task<IActionResult> RemoveAssignment(Guid userId, Guid assignmentId, CancellationToken ct) => ForwardAsync(HttpMethod.Delete, $"/api/pedagora/access/{userId:D}/assignments/{assignmentId:D}", null, ct);
+    public async Task<IActionResult> RemoveAssignment(Guid userId, Guid assignmentId, CancellationToken ct)
+    {
+        if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();
+        await businessAssignments.RemoveAsync(current.OrganizationId.Value, userId, assignmentId, ct);
+        return NoContent();
+    }
+
+    private sealed record AuthGateMemberSnapshot(string Email, string FirstName, string LastName, string PrimaryRole);
+
+    private async Task<AuthGateMemberSnapshot?> GetAuthGateMemberSnapshotAsync(Guid userId, CancellationToken ct)
+    {
+        var raw = await ForwardRawAsync(HttpMethod.Get,
+            $"/api/pedagora/access?page=1&pageSize=100&search={Uri.EscapeDataString(userId.ToString("D"))}", null, ct);
+        if (!raw.IsSuccessStatusCode || string.IsNullOrWhiteSpace(raw.Content)) return null;
+
+        using var document = JsonDocument.Parse(raw.Content);
+        if (!document.RootElement.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) return null;
+        foreach (var item in items.EnumerateArray())
+        {
+            if (!item.TryGetProperty("id", out var idNode) || !Guid.TryParse(idNode.GetString(), out var id) || id != userId) continue;
+            var role = item.TryGetProperty("primaryRole", out var primaryRole) ? primaryRole.GetString() : null;
+            if (string.IsNullOrWhiteSpace(role) && item.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var roleNode in roles.EnumerateArray())
+                {
+                    if (roleNode.ValueKind != JsonValueKind.String) continue;
+                    role = roleNode.GetString();
+                    if (!string.IsNullOrWhiteSpace(role)) break;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(role)) return null;
+            return new AuthGateMemberSnapshot(
+                item.TryGetProperty("email", out var email) ? email.GetString() ?? string.Empty : string.Empty,
+                item.TryGetProperty("firstName", out var firstName) ? firstName.GetString() ?? string.Empty : string.Empty,
+                item.TryGetProperty("lastName", out var lastName) ? lastName.GetString() ?? string.Empty : string.Empty,
+                role);
+        }
+        return null;
+    }
 
     private static string? NormalizeRole(string? raw)
     {
