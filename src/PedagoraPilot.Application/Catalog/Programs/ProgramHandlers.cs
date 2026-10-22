@@ -154,7 +154,7 @@ internal static class ReferentialVersionText
 
 internal static class ProgramDtoFactory
 {
-    public static TrainingProgramDto Create(TrainingProgram p, string familyCode, IReadOnlyCollection<string> siteKeys, string? refVersion, IReadOnlyCollection<string>? capabilities = null) => new(p.Id, p.ExternalKey ?? p.Id.ToString(), p.Code.Value, p.Name, familyCode, LegacyCategory(familyCode), p.Icon, p.DescriptionKey, p.DurationHours, p.Status.ToString().ToLowerInvariant(), capabilities ?? p.Capabilities, siteKeys, refVersion);
+    public static TrainingProgramDto Create(TrainingProgram p, string familyCode, IReadOnlyCollection<string> siteKeys, string? refVersion, IReadOnlyCollection<string>? capabilities = null) => new(p.Id, p.ExternalKey ?? p.Id.ToString(), p.Code.Value, p.Name, familyCode, LegacyCategory(familyCode), p.Icon, p.DescriptionKey, p.DurationHours, p.Status.ToString().ToLowerInvariant(), capabilities ?? p.Capabilities, siteKeys, refVersion, p.ResponsibleTrainerAuthGateUserId, p.ResponsibleTrainerDisplayName);
     private static string LegacyCategory(string familyCode) => familyCode.ToUpperInvariant() switch
     {
         "ROAD_EDUCATION" => "teacher",

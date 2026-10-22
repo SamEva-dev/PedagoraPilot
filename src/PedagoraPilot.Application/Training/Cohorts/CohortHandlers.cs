@@ -34,7 +34,8 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
             throw new ValidationApplicationException("COHORT_PEDAGOGICAL_MANAGER_REQUIRED");
         var activeTrainer = (await members.GetTrainerDirectoryAsync(site.OrganizationId, ct))
             .FirstOrDefault(x => x.AuthGateUserId == request.PedagogicalManagerAuthGateUserId.Value);
-        if (activeTrainer is null)
+        if (activeTrainer is null || !(await members.GetRoleCodesAsync(site.OrganizationId, request.PedagogicalManagerAuthGateUserId.Value, ct))
+                .Any(x => x.Equals("PedagoraPilot.PedagogicalManager", StringComparison.OrdinalIgnoreCase)))
             throw new ValidationApplicationException("COHORT_PEDAGOGICAL_MANAGER_INVALID");
 
         var program = await programs.GetByIdAsync(offering.ProgramId, false, ct)
@@ -92,7 +93,8 @@ public sealed class ReassignCohortManagerCommandHandler(
             throw new ConflictApplicationException(ErrorKeys.CohortClosed);
         var activeTrainer = (await members.GetTrainerDirectoryAsync(cohort.OrganizationId, ct))
             .FirstOrDefault(x => x.AuthGateUserId == request.AuthGateUserId);
-        if (activeTrainer is null)
+        if (activeTrainer is null || !(await members.GetRoleCodesAsync(cohort.OrganizationId, request.AuthGateUserId, ct))
+                .Any(x => x.Equals("PedagoraPilot.PedagogicalManager", StringComparison.OrdinalIgnoreCase)))
             throw new ValidationApplicationException("COHORT_PEDAGOGICAL_MANAGER_INVALID");
         var member = await members.GetByAuthGateUserAsync(cohort.OrganizationId, request.AuthGateUserId, false, ct);
         if (member is null || !member.IsActive)

@@ -18,6 +18,7 @@ public sealed record MemberDirectoryEntry(Guid AuthGateUserId, string Email, str
 public interface IAccessInvitationRepository : IRepository<PedagoraPilot.Domain.Access.AccessInvitation, PedagoraPilot.Domain.Identifiers.AccessInvitationId>
 {
     Task<PedagoraPilot.Domain.Access.AccessInvitation?> GetByTokenHashAsync(string tokenHash, bool isTracking = false, CancellationToken cancellationToken = default);
+    Task AcquireCreationLockAsync(Guid organizationId, string normalizedEmail, CancellationToken cancellationToken = default);
     Task<bool> HasPendingAsync(Guid organizationId, string email, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<PedagoraPilot.Domain.Access.AccessInvitation>> ListForOrganizationAsync(Guid organizationId, bool isTracking = false, CancellationToken cancellationToken = default);
 }

@@ -38,4 +38,38 @@ public sealed class TrainingSiteTests
         site.Status.Should().Be(TrainingSiteStatus.Inactive);
         site.IsActive.Should().BeFalse();
     }
+    [Fact]
+    public void AssignManager_replaces_legacy_name_with_stable_identity()
+    {
+        var site = TrainingSite.Create(Guid.NewGuid(), "NCE", "Nice", "Nice", manager: "Ancien responsable");
+        var identity = Guid.NewGuid();
+
+        site.AssignManager(identity, "Nouveau responsable");
+
+        site.ManagerAuthGateUserId.Should().Be(identity);
+        site.Manager.Should().Be("Nouveau responsable");
+    }
+
+    [Fact]
+    public void Updating_other_fields_keeps_existing_manager_identity()
+    {
+        var site = TrainingSite.Create(Guid.NewGuid(), "NCE", "Nice", "Nice");
+        var identity = Guid.NewGuid();
+        site.AssignManager(identity, "Responsable actuel");
+
+        site.Update("NCE", "Nice Centre", "Nice", "Adresse", "06000", "", "", site.Manager, TrainingSiteStatus.Active);
+
+        site.ManagerAuthGateUserId.Should().Be(identity);
+        site.Manager.Should().Be("Responsable actuel");
+    }
+
+    [Fact]
+    public void Legacy_site_keeps_unresolved_identity_nullable()
+    {
+        var site = TrainingSite.Create(Guid.NewGuid(), "NCE", "Nice", "Nice", manager: "Nom historique");
+
+        site.ManagerAuthGateUserId.Should().BeNull();
+        site.Manager.Should().Be("Nom historique");
+    }
+
 }

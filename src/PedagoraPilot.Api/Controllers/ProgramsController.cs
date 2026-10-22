@@ -30,6 +30,10 @@ public sealed class ProgramsController(IMediator mediator) : ControllerBase
     [HttpPut("{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public Task<TrainingProgramDto> Update(Guid id, UpdateProgramRequest r, CancellationToken ct) => mediator.Send(new UpdateProgramCommand(id, r.FamilyCode, r.Name, r.DescriptionKey, r.EffectiveReferenceVersion, r.Icon, r.DurationHours, r.Status, r.EnabledModules), ct);
     
+    [HttpPut("{id:guid}/responsible"), HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
+    public Task<TrainingProgramDto> AssignResponsible(Guid id, AssignProgramResponsibleRequest r, CancellationToken ct)
+        => mediator.Send(new AssignProgramResponsibleCommand(id, r.AuthGateUserId), ct);
+
     [HttpPut("{id:guid}/sites/{siteId:guid}/offering"), HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public Task<ProgramOfferingDto> Offering(Guid id, Guid siteId, SetProgramOfferingRequest r, CancellationToken ct) => mediator.Send(new SetProgramOfferingCommand(id, siteId, r.Active), ct);
 }

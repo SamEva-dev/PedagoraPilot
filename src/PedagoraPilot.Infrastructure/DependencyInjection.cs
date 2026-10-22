@@ -1,3 +1,5 @@
+using PedagoraPilot.Application.Signatures;
+using PedagoraPilot.Infrastructure.Signatures;
 using Amazon;
 using Amazon.S3;
 using Microsoft.Extensions.Options;
@@ -22,6 +24,7 @@ using PedagoraPilot.Domain.Certification.Events;
 using PedagoraPilot.Domain.DistanceLearning.Events;
 using PedagoraPilot.Domain.Workforce.Events;
 using PedagoraPilot.Domain.Access.Events;
+using PedagoraPilot.Domain.Signatures.Events;
 using PedagoraPilot.Infrastructure.Storage;
 using PedagoraPilot.Application.Abstractions.Storage;
 using PedagoraPilot.Infrastructure.Persistence;
@@ -116,6 +119,11 @@ public static class DependencyInjection
                 registry.Register<RemoteWorkRequestedDomainEvent>("pedagora.workforce.remote-work.requested.v1");
                 registry.Register<RemoteWorkDecisionRecordedDomainEvent>("pedagora.workforce.remote-work.decision-recorded.v1");
                 registry.Register<RemoteWorkActivityUpdatedDomainEvent>("pedagora.workforce.remote-work.activity-updated.v1");
+                registry.Register<SignatureDraftCreatedDomainEvent>("pedagora.signature.draft-created.v1");
+                registry.Register<SignatureRequestedDomainEvent>("pedagora.signature.requested.v1");
+                registry.Register<SignatureReminderRequestedDomainEvent>("pedagora.signature.reminder-requested.v1");
+                registry.Register<SignatureCompletedDomainEvent>("pedagora.signature.completed.v1");
+                registry.Register<SignatureDeclinedDomainEvent>("pedagora.signature.declined.v1");
                 registry.Register<AccessInvitationCreatedDomainEvent>("pedagora.access.invitation.created.v1");
                 registry.Register<AccessInvitationAcceptedDomainEvent>("pedagora.access.invitation.accepted.v1");
                 registry.Register<AccessMemberRoleChangedDomainEvent>("pedagora.access.member.role-changed.v1");
@@ -134,7 +142,12 @@ public static class DependencyInjection
         }
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<ISignatureEnvelopeRepository, SignatureEnvelopeRepository>();
+        services.AddScoped<ISignatureDeliveryProcessor, SignatureDeliveryProcessor>();
+        services.AddScoped<ISignatureArchiveProcessor, SignatureArchiveProcessor>();
+        services.AddSingleton<SignaturePdfRenderer>();
         services.AddScoped<IOrganizationRepository, OrganizationRepository>();
+        services.AddScoped<IBrandingRepository, BrandingRepository>();
         services.AddScoped<IOrganizationMemberRepository, OrganizationMemberRepository>();
         services.AddScoped<IAccessInvitationRepository, AccessInvitationRepository>();
         services.AddScoped<IApplicationIdentityAccess, AuthGateApplicationIdentityAccess>();
@@ -223,9 +236,11 @@ public static class DependencyInjection
             services.AddSingleton<IFileSecurityScanner, NoOpFileSecurityScanner>();
         else throw new InvalidOperationException($"Unsupported Storage:SecurityScanner:Provider '{scanner}'.");
         services.AddScoped<IdempotencyStore>();
-        // Itech.Emailing 2.0.1 owns its own EF Core migrations.
-        // Keep EmailingDbContext migrations in the Itech.Emailing assembly.
-        services.AddItechEmailing(configuration, emailing => emailing.UsePostgres(connectionString));
+        // EmailingDbContext migrations are compiled into PedagoraPilot.Infrastructure,
+        // not into the supplied Itech.Emailing package (its migration files are excluded).
+        // Explicit assembly selection prevents a silent no-op on MigrateAsync().
+        services.AddItechEmailing(configuration, emailing =>
+            emailing.UsePostgres(connectionString, typeof(DependencyInjection).Assembly.GetName().Name));
         services.AddHostedService<EmailDispatcherWorker>();
         // The host (PedagoraPilot.Api) registers IOutboxPublisher because the
         // current transport is SignalR and therefore belongs to the HTTP host.

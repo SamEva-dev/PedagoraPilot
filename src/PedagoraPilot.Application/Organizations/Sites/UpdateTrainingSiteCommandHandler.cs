@@ -6,7 +6,7 @@ using PedagoraPilot.Contracts.Workspace;
 using PedagoraPilot.Domain.Organizations;
 
 namespace PedagoraPilot.Application.Organizations.Sites;
-public sealed class UpdateTrainingSiteCommandHandler(ITrainingSiteRepository sites, IOrganizationRepository organizations, ICurrentUser current)
+public sealed class UpdateTrainingSiteCommandHandler(ITrainingSiteRepository sites, IOrganizationRepository organizations, ICurrentUser current, IOrganizationMemberRepository members)
     : IRequestHandler<UpdateTrainingSiteCommand, WorkspaceSiteDto>
 {
     public async Task<WorkspaceSiteDto> Handle(UpdateTrainingSiteCommand request, CancellationToken ct)
@@ -24,13 +24,31 @@ public sealed class UpdateTrainingSiteCommandHandler(ITrainingSiteRepository sit
             && await sites.CodeExistsAsync(request.OrganizationId, request.Code, ct))
             throw new ConflictApplicationException(ErrorKeys.SiteCodeAlreadyExists);
 
+        // Resolve the requested identity before mutating the tracked aggregate.
+        string managerName = site.Manager;
+        if (request.ManagerAuthGateUserId is Guid managerId)
+        {
+            var member = await members.GetByAuthGateUserAsync(request.OrganizationId, managerId, false, ct);
+            if (member is null || !member.IsActive)
+                throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
+            var roleCodes = await members.GetRoleCodesAsync(request.OrganizationId, managerId, ct);
+            if (!roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
+                throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
+            managerName = member.DisplayName;
+        }
+        else if (!site.ManagerAuthGateUserId.HasValue &&
+                 !string.Equals(request.Manager?.Trim(), site.Manager, StringComparison.Ordinal))
+            throw new ConflictApplicationException("SITE_MANAGER_ID_REQUIRED");
+
         site.Update(request.Code, request.Name, request.City, request.Address, request.PostalCode,
-            request.Phone, request.Email, request.Manager, ParseStatus(request.Status));
+            request.Phone, request.Email, managerName, ParseStatus(request.Status));
+        if (request.ManagerAuthGateUserId is Guid assignedId)
+            site.AssignManager(assignedId, managerName);
 
         return new WorkspaceSiteDto(site.Id, site.ExternalKey ?? $"site-{site.Code.Value.ToLowerInvariant()}",
             site.OrganizationId, $"org-{organization.Code.Value.ToLowerInvariant()}", site.Code.Value,
             site.Name, site.City, site.Address, site.PostalCode, site.Phone, site.Email, site.Manager,
-            site.Status.ToString().ToLowerInvariant(), site.IsActive);
+            site.Status.ToString().ToLowerInvariant(), site.IsActive, site.ManagerAuthGateUserId);
     }
 
     private static TrainingSiteStatus ParseStatus(string value)

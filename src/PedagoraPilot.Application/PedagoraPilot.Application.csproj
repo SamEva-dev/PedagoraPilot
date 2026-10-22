@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <ProjectReference Include="..\PedagoraPilot.Domain\PedagoraPilot.Domain.csproj" />
     <ProjectReference Include="..\PedagoraPilot.Contracts\PedagoraPilot.Contracts.csproj" />
+    <ProjectReference Include="..\PedagoraPilot.Domain\PedagoraPilot.Domain.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="DomainRelay" />

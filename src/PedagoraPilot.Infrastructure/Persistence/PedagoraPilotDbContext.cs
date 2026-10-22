@@ -1,3 +1,4 @@
+using PedagoraPilot.Domain.Branding;
 using DomainRelay.EFCore.Outbox;
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Domain.Catalog;
@@ -12,6 +13,7 @@ using PedagoraPilot.Domain.DistanceLearning;
 using PedagoraPilot.Domain.Workforce;
 using PedagoraPilot.Domain.Audit;
 using PedagoraPilot.Domain.Access;
+using PedagoraPilot.Domain.Signatures;
 using PedagoraPilot.Infrastructure.Persistence.Catalog;
 using PedagoraPilot.Infrastructure.Persistence.Idempotency;
 
@@ -22,6 +24,10 @@ public sealed class PedagoraPilotDbContext : DbContext
     {
     }
 
+    public DbSet<OrganizationBranding> OrganizationBrandings => Set<OrganizationBranding>();
+    public DbSet<BrandingRevision> BrandingRevisions => Set<BrandingRevision>();
+    public DbSet<BrandingAsset> BrandingAssets => Set<BrandingAsset>();
+    public DbSet<SignatureEnvelope> SignatureEnvelopes => Set<SignatureEnvelope>();
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<TrainingSite> TrainingSites => Set<TrainingSite>();
     public DbSet<IdempotencyRequest> IdempotencyRequests => Set<IdempotencyRequest>();
@@ -92,6 +98,7 @@ public sealed class PedagoraPilotDbContext : DbContext
     public override Task<int> SaveChangesAsync(CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
+        Touch<SignatureEnvelope>(now);
         Touch<Organization>(now);
         Touch<OrganizationMember>(now);
         Touch<AccessInvitation>(now);

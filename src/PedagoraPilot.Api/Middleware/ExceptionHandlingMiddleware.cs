@@ -51,6 +51,26 @@ public sealed class ExceptionHandlingMiddleware
             _logger.LogWarning(exception, "Concurrent attendance sheet initialization.");
             await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.ConcurrencyConflict);
         }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && string.Equals(pg.ConstraintName, "ux_signature_source_revision", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(exception, "Concurrent signature draft creation.");
+            await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.SignatureDuplicateSource);
+        }
+        // Database unique indexes are the final arbiter when two HTTP requests
+        // pass the application-level duplicate check concurrently.
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && EnrollmentJuryUniqueConflict.TryResolve(pg.ConstraintName, out _))
+        {
+            var pgs = (Npgsql.PostgresException)exception.InnerException!;
+            EnrollmentJuryUniqueConflict.TryResolve(pgs.ConstraintName, out var errorKey);
+            _logger.LogWarning(exception, "Concurrent jury assignment or enrollment rejected by unique index.");
+            await WriteAsync(context, StatusCodes.Status409Conflict, errorKey);
+        }
         catch (UnauthorizedAccessException exception)
         {
             _logger.LogWarning(exception, "Unauthorized operation.");

@@ -337,7 +337,7 @@ public sealed class PublishCertificationResultsCommandHandler(ICertificationExam
     }
 }
 
-public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<AssignJuryCommand, JuryAssignmentDto>
+public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, IOrganizationMemberRepository members, ICurrentUser current) : IRequestHandler<AssignJuryCommand, JuryAssignmentDto>
 {
     public async Task<JuryAssignmentDto> Handle(AssignJuryCommand r, CancellationToken ct)
     {
@@ -346,7 +346,26 @@ public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository
         await CertificationContextualAccess.EnsureSessionAsync(s, cohorts, offerings, current, manage: true, ct);
         if (s.Status is CertificationExamSessionStatus.Cancelled or CertificationExamSessionStatus.Completed or CertificationExamSessionStatus.Published)
             throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
-        var j = JuryAssignment.Create(s.OrganizationId, s.Id, r.AuthGateUserId, r.DisplayName, r.Role);
+        // The API must not trust a user id or display name supplied by the browser.
+        // Resolve the identity within the session tenant before assigning an examiner.
+        var member = await members.GetByAuthGateUserAsync(s.OrganizationId, r.AuthGateUserId, false, ct);
+        if (member is null || !member.IsActive)
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+
+        var juryRoles = await members.GetRoleCodesAsync(s.OrganizationId, r.AuthGateUserId, ct);
+        if (!juryRoles.Any(role => string.Equals(role, "jury", StringComparison.OrdinalIgnoreCase)))
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+
+        var alreadyAssigned = await juries.Query(false).AnyAsync(x =>
+            x.OrganizationId == s.OrganizationId && x.ExamSessionId == s.Id
+            && x.AuthGateUserId == member.AuthGateUserId, ct);
+        if (alreadyAssigned)
+            throw new ConflictApplicationException("CERTIFICATION_JURY_ALREADY_ASSIGNED");
+
+        var displayName = member.DisplayName;
+        if (string.IsNullOrWhiteSpace(displayName))
+            throw new ConflictApplicationException("CERTIFICATION_JURY_DISPLAY_NAME_REQUIRED");
+        var j = JuryAssignment.Create(s.OrganizationId, s.Id, member.AuthGateUserId, displayName, r.Role);
         await juries.AddAsync(j, ct);
         return CertMap.Jury(j);
     }

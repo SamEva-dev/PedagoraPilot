@@ -48,6 +48,14 @@ public sealed class CreateAccessInvitationCommandHandler(
         var role = NormalizeRole(request.Role) ?? throw new ValidationApplicationException("ACCESS_ROLE_INVALID");
         var email = (request.Email ?? string.Empty).Trim().ToLowerInvariant();
         if (email.Length == 0) throw new ValidationApplicationException("ACCESS_EMAIL_REQUIRED");
+        // A student invitation must point to a precise cohort: never provision an
+        // unassigned learner from a broadly scoped access-management screen.
+        if (string.Equals(role, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase)
+            && (!request.CohortId.HasValue || request.CohortId.Value == Guid.Empty))
+            throw new ValidationApplicationException("ACCESS_STUDENT_COHORT_REQUIRED");
+        // Serialize invitation creation per (organization, email) across all API instances.
+        // UnitOfWorkBehavior holds the transaction through SaveChanges and commit.
+        await invitations.AcquireCreationLockAsync(organizationId, email, ct);
         if (await invitations.HasPendingAsync(organizationId, email, ct)) throw new ConflictApplicationException("ACCESS_INVITATION_ALREADY_EXISTS");
 
         // Cohort drives the tenant/site/program relationship. Never trust a client-supplied

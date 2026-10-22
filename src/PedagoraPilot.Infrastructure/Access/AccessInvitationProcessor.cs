@@ -18,11 +18,11 @@ public sealed class AccessInvitationProcessor(
     IStudentMemberProvisioner studentMembers,
     IUnitOfWork unitOfWork,
     PedagoraPilot.Infrastructure.Persistence.PedagoraPilotDbContext db,
-    IEmailingService emailing,
+    IIdempotentEmailingService emailing,
     IConfiguration configuration,
     IHostEnvironment environment) : IAccessInvitationProcessor
 {
-    public async Task ProcessCreatedAsync(Guid invitationId, string token, CancellationToken ct = default)
+    public async Task ProcessCreatedAsync(Guid invitationId, string token, Guid eventId, CancellationToken ct = default)
     {
         var invitation = await invitations.GetByIdAsync(new AccessInvitationId(invitationId), true, ct);
         if (invitation is null || !invitation.IsUsable(DateTime.UtcNow)) return;
@@ -46,13 +46,15 @@ public sealed class AccessInvitationProcessor(
         var url = $"{acceptBase}/{Uri.EscapeDataString(token)}";
         var displayName = string.Join(' ', new[] { invitation.FirstName, invitation.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
         if (displayName.Length == 0) displayName = invitation.Email;
-        await emailing.QueueHtmlAsync(
+        await emailing.QueueHtmlOnceAsync(
             invitation.Email,
             "Invitation à rejoindre Pedagora Pilot",
             $"<p>Bonjour {System.Net.WebUtility.HtmlEncode(displayName)},</p><p>Vous êtes invité à rejoindre Pedagora Pilot.</p><p><a href=\"{System.Net.WebUtility.HtmlEncode(url)}\">Accepter l'invitation</a></p>",
             $"Bonjour {displayName}, vous êtes invité à rejoindre Pedagora Pilot : {url}",
             attachments: null,
             tags: EmailUseCaseTags.AccessInviteUser,
+            idempotencyKey: $"pedagora:invite:{invitation.OrganizationId:N}:{eventId:N}",
+            tenantId: invitation.OrganizationId,
             cancellationToken: ct);
     }
 

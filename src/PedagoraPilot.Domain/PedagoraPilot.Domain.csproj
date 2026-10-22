@@ -2,5 +2,6 @@
   <ItemGroup>
     <PackageReference Include="DomainRelay.Abstractions" />
     <PackageReference Include="DomainRelay.EFCore" />
+    <PackageReference Include="QuestPDF" />
   </ItemGroup>
 </Project>

@@ -1,3 +1,4 @@
+using PedagoraPilot.Application.Signatures;
 using System.Net;
 using System.Text.Json;
 using DomainRelay.Abstractions;
@@ -16,14 +17,18 @@ namespace PedagoraPilot.Api.Hubs;
 public sealed class SignalROutboxTransport : IRealtimeOutboxTransport
 {
     private readonly IMediator _mediator;
-    private readonly IEmailingService _emailing;
+    private readonly IIdempotentEmailingService _emailing;
     private readonly ILogger<SignalROutboxTransport> _logger;
     private readonly IAccessInvitationProcessor _accessInvitations;
-    public SignalROutboxTransport(IMediator mediator, IEmailingService emailing, IAccessInvitationProcessor accessInvitations, ILogger<SignalROutboxTransport> logger)
+    private readonly ISignatureDeliveryProcessor _signatureDelivery;
+    private readonly ISignatureArchiveProcessor _signatureArchive;
+    public SignalROutboxTransport(IMediator mediator, IIdempotentEmailingService emailing, IAccessInvitationProcessor accessInvitations, ISignatureDeliveryProcessor signatureDelivery, ISignatureArchiveProcessor signatureArchive, ILogger<SignalROutboxTransport> logger)
     {
         _mediator = mediator;
         _emailing = emailing;
         _accessInvitations = accessInvitations;
+        _signatureDelivery = signatureDelivery;
+        _signatureArchive = signatureArchive;
         _logger = logger;
     }
 
@@ -37,7 +42,25 @@ public sealed class SignalROutboxTransport : IRealtimeOutboxTransport
             var token = TryReadString(root, "Token", "token");
             if (!invitationId.HasValue || string.IsNullOrWhiteSpace(token))
                 throw new InvalidOperationException("Invalid access invitation outbox payload.");
-            await _accessInvitations.ProcessCreatedAsync(invitationId.Value, token, cancellationToken);
+            await _accessInvitations.ProcessCreatedAsync(invitationId.Value, token, envelope.EventId, cancellationToken);
+        }
+        if (string.Equals(envelope.TypeKey, "pedagora.signature.requested.v1", StringComparison.Ordinal))
+        {
+            var signatureId = TryReadStrongGuid(root, "EnvelopeId", "envelopeId");
+            if (!signatureId.HasValue) throw new InvalidOperationException("Invalid signature-requested outbox payload.");
+            await _signatureDelivery.DeliverRequestAsync(signatureId.Value, envelope.EventId, cancellationToken);
+        }
+        if (string.Equals(envelope.TypeKey, "pedagora.signature.reminder-requested.v1", StringComparison.Ordinal))
+        {
+            var signatureId = TryReadStrongGuid(root, "EnvelopeId", "envelopeId");
+            if (!signatureId.HasValue) throw new InvalidOperationException("Invalid signature reminder outbox payload.");
+            await _signatureDelivery.DeliverReminderAsync(signatureId.Value, envelope.EventId, cancellationToken);
+        }
+        if (envelope.TypeKey is "pedagora.signature.completed.v1" or "pedagora.signature.declined.v1")
+        {
+            var signatureId = TryReadStrongGuid(root, "EnvelopeId", "envelopeId");
+            if (!signatureId.HasValue) throw new InvalidOperationException("Invalid signature-archive outbox payload.");
+            await _signatureArchive.ArchiveAsync(signatureId.Value, cancellationToken);
         }
         var organizationId = TryReadGuid(root, "OrganizationId", "organizationId");
         if (organizationId.HasValue)
@@ -53,7 +76,10 @@ public sealed class SignalROutboxTransport : IRealtimeOutboxTransport
         if (string.IsNullOrWhiteSpace(recipient))
             return;
         var(subject, html, text) = BuildEmail(envelope.TypeKey, root);
-        await _emailing.QueueHtmlAsync(recipient, subject, html, text, attachments: null, tags: EmailUseCaseTags.NotificationSystem, cancellationToken);
+        await _emailing.QueueHtmlOnceAsync(recipient, subject, html, text,
+            attachments: null, tags: EmailUseCaseTags.NotificationSystem,
+            idempotencyKey: $"pedagora:event:{envelope.EventId:N}",
+            tenantId: organizationId, cancellationToken: cancellationToken);
     }
 
     private static (string Subject, string Html, string Text) BuildEmail(string typeKey, JsonElement payload)

@@ -32,10 +32,8 @@ public sealed class StudentMemberProvisioner(
             person = Person.Create(firstName, lastName, email, phone, birthDate);
             await persons.AddAsync(person, ct);
         }
-        else
-        {
-            person.UpdateContact(firstName, lastName, email, phone ?? person.Phone, birthDate ?? person.BirthDate);
-        }
+        // Delay contact updates until the AuthGate binding is verified. An email
+        // collision must not mutate another identity's personal data.
 
         var learner = await learnerProfiles.GetByPersonIdAsync(person.Id, true, ct);
         if (learner is null)
@@ -51,6 +49,9 @@ public sealed class StudentMemberProvisioner(
         {
             throw new ConflictApplicationException("LEARNER_AUTHGATE_IDENTITY_CONFLICT");
         }
+
+        if (person is not null)
+            person.UpdateContact(firstName, lastName, email, phone ?? person.Phone, birthDate ?? person.BirthDate);
 
         if (!cohortId.HasValue) return learner.Id;
         var cohort = await cohorts.GetByIdAsync(new CohortId(cohortId.Value), false, ct)

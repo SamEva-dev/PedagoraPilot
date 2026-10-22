@@ -14,7 +14,7 @@ public sealed class SitesController(IMediator mediator) : ControllerBase
     public async Task<ActionResult<WorkspaceSiteDto>> Update(Guid organizationId, Guid siteId, [FromBody] UpdateTrainingSiteRequest request, CancellationToken ct)
         => Ok(await mediator.Send(new UpdateTrainingSiteCommand(organizationId, siteId, request.Code, request.Name,
             request.City, request.Address, request.PostalCode, request.Phone, request.Email, request.Manager,
-            request.Status), ct));
+            request.Status, request.ManagerAuthGateUserId), ct));
 
     [HttpDelete("{siteId:guid}"), HasPermission(PedagoraPilotPermissionCodes.Sites.Delete)]
     public async Task<IActionResult> Delete(Guid organizationId, Guid siteId, CancellationToken ct)
@@ -28,7 +28,7 @@ public sealed class SitesController(IMediator mediator) : ControllerBase
     {
         var result = await mediator.Send(new CreateTrainingSiteCommand(organizationId, request.Code, request.Name,
             request.City, request.Address, request.PostalCode, request.Phone, request.Email, request.Manager,
-            request.Status, request.ExternalKey), ct);
+            request.Status, request.ExternalKey, request.ManagerAuthGateUserId), ct);
         return Created($"/api/v1/organizations/{organizationId}/sites/{result.Id}", result);
     }
 }

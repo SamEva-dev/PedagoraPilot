@@ -14,6 +14,7 @@ public static class SchemaNames
     public const string Audit = "audit";
     public const string Workforce = "workforce";
     public const string Integration = "integration";
+    public const string Signature = "signature";
     public const string Observability = "observability";
     public const string Emailing = "emailing";
 }

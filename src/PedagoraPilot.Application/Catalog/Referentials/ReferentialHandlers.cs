@@ -20,10 +20,12 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
             // Tenant-owned programs belong to the organization even before they are attached
             // to a site. Their initial referential/version is created with the program and must
             // therefore be visible immediately in the "Version source" selector.
-            var tenantOwnedProgramIds = await programs.Query(false)
-                .Where(x => x.OrganizationId == organizationId.Value)
-                .Select(x => x.Id)
-                .ToArrayAsync(ct);
+            var tenantOwnedProgramIds = current.HasContextualScopeRestrictions
+                ? Array.Empty<Guid>()
+                : await programs.Query(false)
+                    .Where(x => x.OrganizationId == organizationId.Value)
+                    .Select(x => x.Id)
+                    .ToArrayAsync(ct);
 
             var paths = await (from offering in offerings.Query(false)
                                join site in sites.Query(false) on offering.SiteId equals site.Id
@@ -115,6 +117,7 @@ public sealed class GetReferentialVersionDetailsQueryHandler(
     IReferentialRepository referentials,
     IProgramOfferingRepository offerings,
     ITrainingSiteRepository sites,
+    ITrainingProgramRepository programs,
     ICompetencyDefinitionRepository competencies,
     IPedagogicalTopicRepository topics,
     IWorkplaceActivityDefinitionRepository workplaceActivities,
@@ -128,7 +131,7 @@ public sealed class GetReferentialVersionDetailsQueryHandler(
     {
         var version = await versions.GetByIdAsync(request.VersionId, false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.ReferentialVersionNotFound);
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, request.VersionId, versions, referentials, offerings, sites, ct);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, request.VersionId, versions, referentials, offerings, sites, programs, ct);
 
         var definitions = await competencies.Query(false)
             .Where(x => x.ReferentialVersionId == request.VersionId && x.Active)

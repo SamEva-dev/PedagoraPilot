@@ -38,6 +38,7 @@ public sealed class TrainingSite : AggregateRoot
     public string Phone { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
     public string Manager { get; private set; } = string.Empty;
+    public Guid? ManagerAuthGateUserId { get; private set; }
     public string? ExternalKey { get; private set; }
     public TrainingSiteStatus Status { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -69,6 +70,20 @@ public sealed class TrainingSite : AggregateRoot
         Status = status == TrainingSiteStatus.Archived ? TrainingSiteStatus.Inactive : status;
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new TrainingSiteUpdatedDomainEvent(Id, OrganizationId, Code.Value, Name));
+    }
+
+    public void AssignManager(Guid authGateUserId, string displayName)
+    {
+        if (authGateUserId == Guid.Empty) throw new DomainException("SITE_MANAGER_REQUIRED");
+        ManagerAuthGateUserId = authGateUserId;
+        Manager = Normalize(displayName, 160, "SITE_MANAGER_REQUIRED");
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    public void ClearManagerIdentity()
+    {
+        ManagerAuthGateUserId = null;
+        UpdatedAtUtc = DateTime.UtcNow;
     }
 
     public void MarkDeleted() => RaiseDomainEvent(new TrainingSiteDeletedDomainEvent(Id, OrganizationId));

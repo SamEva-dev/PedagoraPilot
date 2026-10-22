@@ -65,6 +65,7 @@ public static class DependencyInjection
         services.AddTransient<IValidator<CreateTrainingSessionCommand>, CreateTrainingSessionCommandValidator>();
         services.AddTransient<IValidator<UpdateTrainingSessionCommand>, UpdateTrainingSessionCommandValidator>();
         services.AddTransient<IValidator<SaveAttendanceCommand>, SaveAttendanceCommandValidator>();
+        services.AddTransient<IValidator<PedagoraPilot.Application.Signatures.CreateSignatureDraftCommand>, PedagoraPilot.Application.Signatures.CreateSignatureDraftCommandValidator>();
         services.AddTransient<IValidator<EvaluateCompetencyCommand>, EvaluateCompetencyCommandValidator>();
         services.AddTransient<IValidator<UpdateTopicProgressCommand>, UpdateTopicProgressCommandValidator>();
         services.AddTransient<IValidator<RecordDrivingEvaluationCommand>, RecordDrivingEvaluationCommandValidator>();
@@ -88,6 +89,7 @@ public static class DependencyInjection
             builder.AddProfile<LearningProgressMappingProfile>();
             builder.AddProfile<WorkplaceMappingProfile>();
             builder.AddProfile<DocumentMappingProfile>();
+            builder.AddProfile<SignatureMappingProfile>();
             builder.AddProfile<CertificationMappingProfile>();
             builder.AddProfile<DistanceLearningMappingProfile>();
             builder.AddProfile<WorkforceMappingProfile>();

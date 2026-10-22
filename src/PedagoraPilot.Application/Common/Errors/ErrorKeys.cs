@@ -2,6 +2,33 @@ namespace PedagoraPilot.Application.Common.Errors;
 /// Stable backend error keys. Every key added here MUST be translated in Angular FR/EN in the same sprint.
 public static class ErrorKeys
 {
+    public const string SignatureNotFound = "SIGNATURE_NOT_FOUND";
+    public const string SignatureSourceInvalid = "SIGNATURE_SOURCE_INVALID";
+    public const string SignatureSourceNotFound = "SIGNATURE_SOURCE_NOT_FOUND";
+    public const string SignatureSignerUnlinked = "SIGNATURE_SIGNER_UNLINKED";
+    public const string SignatureEnrollmentNotEligible = "SIGNATURE_ENROLLMENT_NOT_ELIGIBLE";
+    public const string SignatureAttendanceNotSignable = "SIGNATURE_ATTENDANCE_NOT_SIGNABLE";
+    public const string SignatureAttendanceChanged = "SIGNATURE_ATTENDANCE_CHANGED";
+    public const string SignatureAttendanceSessionNotFinished = "SIGNATURE_ATTENDANCE_SESSION_NOT_FINISHED";
+    public const string SignatureContextInvalid = "SIGNATURE_CONTEXT_INVALID";
+    public const string SignatureSignerRequired = "SIGNATURE_SIGNER_REQUIRED";
+    public const string SignatureSnapshotInvalid = "SIGNATURE_SNAPSHOT_INVALID";
+    public const string SignatureTransitionForbidden = "SIGNATURE_TRANSITION_FORBIDDEN";
+    public const string SignatureReminderRateLimited = "SIGNATURE_REMINDER_RATE_LIMITED";
+    public const string SignatureCenterStatusInvalid = "SIGNATURE_CENTER_STATUS_INVALID";
+    public const string SignatureBatchInvalid = "SIGNATURE_BATCH_INVALID";
+    public const string SignatureDailySummaryInvalid = "SIGNATURE_DAILY_SUMMARY_INVALID";
+    public const string SignatureDailySummaryChanged = "SIGNATURE_DAILY_SUMMARY_CHANGED";
+    public const string SignatureTimezoneInvalid = "SIGNATURE_TIMEZONE_INVALID";
+    public const string SignatureEvidenceRequired = "SIGNATURE_EVIDENCE_REQUIRED";
+    public const string SignatureCommentTooLong = "SIGNATURE_COMMENT_TOO_LONG";
+    public const string SignatureExpired = "SIGNATURE_EXPIRED";
+    public const string SignatureTimeInvalid = "SIGNATURE_TIME_INVALID";
+    public const string SignatureDuplicateSource = "SIGNATURE_DUPLICATE_SOURCE";
+    public const string SignatureArchiveNotReady = "SIGNATURE_ARCHIVE_NOT_READY";
+    public const string SignatureArchiveNotFinal = "SIGNATURE_ARCHIVE_NOT_FINAL";
+    public const string SignatureArchiveIntegrityFailed = "SIGNATURE_ARCHIVE_INTEGRITY_FAILED";
+
     public const string Unexpected = "COMMON_UNEXPECTED_ERROR", ValidationFailed = "COMMON_VALIDATION_FAILED", ConcurrencyConflict = "COMMON_CONCURRENCY_CONFLICT";
     public const string ValidationRequired = "VALIDATION_REQUIRED", ValidationEmail = "VALIDATION_EMAIL", ValidationMaxLength = "VALIDATION_MAX_LENGTH", ValidationExactLength = "VALIDATION_EXACT_LENGTH";
     public const string Unauthorized = "AUTH_UNAUTHORIZED", Forbidden = "AUTH_FORBIDDEN";

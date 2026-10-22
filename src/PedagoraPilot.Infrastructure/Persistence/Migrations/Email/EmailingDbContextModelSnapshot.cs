@@ -112,8 +112,15 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.Email
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("DispatchLeaseId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("HtmlContent")
                         .HasColumnType("text");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<string>("LastError")
                         .HasColumnType("text");
@@ -126,6 +133,10 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.Email
 
                     b.Property<DateTime?>("NextAttemptAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("ProviderMessageId")
                         .HasColumnType("text");
@@ -160,6 +171,12 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.Email
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DispatchLeaseId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
 
                     b.HasIndex("ProviderMessageId");
 

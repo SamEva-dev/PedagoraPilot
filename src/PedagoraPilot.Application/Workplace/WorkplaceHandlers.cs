@@ -154,23 +154,23 @@ public sealed class GetWorkplacePeriodQueryHandler(IWorkplacePeriodRepository pe
     }
 }
 
-public sealed class GetWorkplacePeriodTypesQueryHandler(IWorkplaceActivityDefinitionRepository activities, IWorkplaceDocumentRequirementRepository documents, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetWorkplacePeriodTypesQuery, IReadOnlyCollection<string>>
+public sealed class GetWorkplacePeriodTypesQueryHandler(IWorkplaceActivityDefinitionRepository activities, IWorkplaceDocumentRequirementRepository documents, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<GetWorkplacePeriodTypesQuery, IReadOnlyCollection<string>>
 {
     public async Task<IReadOnlyCollection<string>> Handle(GetWorkplacePeriodTypesQuery r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct);
         var fromActivities = await activities.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).Select(x => x.PeriodTypeCode).Distinct().ToListAsync(ct);
         var fromDocuments = await documents.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).Select(x => x.PeriodTypeCode).Distinct().ToListAsync(ct);
         return fromActivities.Concat(fromDocuments).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray();
     }
 }
 
-public sealed class GetWorkplaceRequirementsQueryHandler(IWorkplaceActivityDefinitionRepository a, IWorkplaceDocumentRequirementRepository d, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetWorkplaceRequirementsQuery, IReadOnlyCollection<WorkplaceRequirementDto>>
+public sealed class GetWorkplaceRequirementsQueryHandler(IWorkplaceActivityDefinitionRepository a, IWorkplaceDocumentRequirementRepository d, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<GetWorkplaceRequirementsQuery, IReadOnlyCollection<WorkplaceRequirementDto>>
 {
     public async Task<IReadOnlyCollection<WorkplaceRequirementDto>> Handle(GetWorkplaceRequirementsQuery r, CancellationToken ct)
     {
         var p = r.PeriodTypeCode.Trim().ToUpperInvariant();
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct);
         var activities = await a.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.PeriodTypeCode == p && x.Active).OrderBy(x => x.SortOrder).Select(x => new WorkplaceRequirementDto(x.Id.Value, x.Code, x.Title, x.LabelKey, x.Mandatory, x.SortOrder, "activity")).ToListAsync(ct);
         var docs = await d.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.PeriodTypeCode == p && x.Active).OrderBy(x => x.SortOrder).Select(x => new WorkplaceRequirementDto(x.Id.Value, x.Code, x.Title, x.LabelKey, x.Mandatory, x.SortOrder, "document")).ToListAsync(ct);
         return activities.Concat(docs).ToArray();

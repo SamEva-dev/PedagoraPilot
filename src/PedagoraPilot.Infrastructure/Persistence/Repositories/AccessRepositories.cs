@@ -130,6 +130,17 @@ public sealed class AccessInvitationRepository(PedagoraPilotDbContext db) : IAcc
     public IQueryable<AccessInvitation> Query(bool isTracking = false) => isTracking ? db.AccessInvitations : db.AccessInvitations.AsNoTracking();
     public Task<AccessInvitation?> GetByIdAsync(AccessInvitationId id, bool isTracking = false, CancellationToken cancellationToken = default) => Query(isTracking).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<AccessInvitation?> GetByTokenHashAsync(string tokenHash, bool isTracking = false, CancellationToken cancellationToken = default) => Query(isTracking).FirstOrDefaultAsync(x => x.TokenHash == tokenHash, cancellationToken);
+    // The command pipeline opens a transaction before invoking this repository.
+    // Both checks and the INSERT therefore occur under the same transaction-scoped lock.
+    // PostgreSQL hash collisions merely serialize unrelated invitations; they cannot bypass validation.
+    public async Task AcquireCreationLockAsync(Guid organizationId, string normalizedEmail, CancellationToken cancellationToken = default)
+    {
+        if (db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("ACCESS_INVITATION_TRANSACTION_REQUIRED");
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtext({0}), hashtext({1}))",
+            new object[] { organizationId.ToString("D"), normalizedEmail }, cancellationToken);
+    }
     public Task<bool> HasPendingAsync(Guid organizationId, string email, CancellationToken cancellationToken = default) => Query().AnyAsync(x => x.OrganizationId == organizationId && x.Email == email && x.Status == AccessInvitationStatus.Pending && x.ExpiresAtUtc > DateTime.UtcNow, cancellationToken);
     public async Task<IReadOnlyCollection<AccessInvitation>> ListForOrganizationAsync(Guid organizationId, bool isTracking = false, CancellationToken cancellationToken = default) => await Query(isTracking).Where(x => x.OrganizationId == organizationId && x.Status == AccessInvitationStatus.Pending && x.ExpiresAtUtc > DateTime.UtcNow).OrderBy(x => x.CreatedAtUtc).ToListAsync(cancellationToken);
     public async Task AddAsync(AccessInvitation entity, CancellationToken cancellationToken = default) => await db.AccessInvitations.AddAsync(entity, cancellationToken);

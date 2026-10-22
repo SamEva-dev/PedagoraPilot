@@ -11,12 +11,14 @@ public sealed class CreateTrainingSiteCommandHandler : IRequestHandler<CreateTra
     private readonly IOrganizationRepository _orgs;
     private readonly ITrainingSiteRepository _sites;
     private readonly ICurrentUser _current;
+    private readonly IOrganizationMemberRepository _members;
 
-    public CreateTrainingSiteCommandHandler(IOrganizationRepository orgs, ITrainingSiteRepository sites, ICurrentUser current)
+    public CreateTrainingSiteCommandHandler(IOrganizationRepository orgs, ITrainingSiteRepository sites, ICurrentUser current, IOrganizationMemberRepository members)
     {
         _orgs = orgs;
         _sites = sites;
         _current = current;
+        _members = members;
     }
 
     public async Task<WorkspaceSiteDto> Handle(CreateTrainingSiteCommand r, CancellationToken ct)
@@ -32,6 +34,18 @@ public sealed class CreateTrainingSiteCommandHandler : IRequestHandler<CreateTra
         var status = ParseStatus(r.Status);
         var site = TrainingSite.Create(r.OrganizationId, r.Code, r.Name, r.City, r.ExternalKey,
             r.Address, r.PostalCode, r.Phone, r.Email, r.Manager, status);
+        if (r.ManagerAuthGateUserId is Guid managerId)
+        {
+            var member = await _members.GetByAuthGateUserAsync(r.OrganizationId, managerId, false, ct);
+            if (member is null || !member.IsActive)
+                throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
+            var roleCodes = await _members.GetRoleCodesAsync(r.OrganizationId, managerId, ct);
+            if (!roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
+                throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
+            site.AssignManager(managerId, member.DisplayName);
+        }
+        else
+            throw new ConflictApplicationException("SITE_MANAGER_ID_REQUIRED");
         await _sites.AddAsync(site, ct);
         return ToDto(site, org.Code.Value);
     }
@@ -47,5 +61,5 @@ public sealed class CreateTrainingSiteCommandHandler : IRequestHandler<CreateTra
         => new(site.Id, site.ExternalKey ?? $"site-{site.Code.Value.ToLowerInvariant()}", site.OrganizationId,
             $"org-{organizationCode.ToLowerInvariant()}", site.Code.Value, site.Name, site.City,
             site.Address, site.PostalCode, site.Phone, site.Email, site.Manager,
-            site.Status.ToString().ToLowerInvariant(), site.IsActive);
+            site.Status.ToString().ToLowerInvariant(), site.IsActive, site.ManagerAuthGateUserId);
 }

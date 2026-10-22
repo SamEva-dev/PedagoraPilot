@@ -1,3 +1,4 @@
+using PedagoraPilot.Application.Branding;
 using Itech.Emailing.Persistence;
 using Itech.Emailing.Webhooks;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,7 @@ try
     var builder = WebApplication.CreateBuilder(args);
     ConfigureSerilogFilePaths(builder);
     builder.Host.UseSerilog((context, services, configuration) => configuration.ReadFrom.Configuration(context.Configuration).ReadFrom.Services(services).Enrich.FromLogContext());
+    builder.Services.AddScoped<BrandingService>();
     builder.Services.AddControllers();
     builder.Services.AddHttpClient("AuthGateAccess", client =>
     {
@@ -59,6 +61,9 @@ try
     });
     var app = builder.Build();
 
+    if (app.Environment.IsProduction() &&
+        (!Enum.TryParse<QuestPDF.Infrastructure.LicenseType>(app.Configuration["Signatures:Pdf:QuestPdfLicense"], true, out var pdfLicense) || !Enum.IsDefined(pdfLicense)))
+        throw new InvalidOperationException("Signatures:Pdf:QuestPdfLicense must be configured before Production migrations.");
     // Verify actual storage/scanner implementations before any database migration.
     // Provider names in configuration alone do not prove production readiness.
     ProductionDependencyGuard.Validate(
@@ -92,6 +97,7 @@ try
     app.MapHub<NotificationsHub>(builder.Configuration["Realtime:HubPath"] ?? "/hubs/notifications");
     app.MapBrevoTransactionalWebhook("/api/webhooks/brevo/transactional");
     await ApplyEmailingMigrationsAsync(app);
+    await VerifyEmailingS20SchemaAsync(app);
     await WarmAuthGateSigningKeysAsync(app);
     Log.Information("Pedagora Pilot API starting. Environment={Environment}", app.Environment.EnvironmentName);
     await app.RunAsync();
@@ -162,6 +168,41 @@ static void ConfigureSerilogFilePaths(WebApplicationBuilder builder)
     // Keep the indexes synchronized with appsettings*.json WriteTo sections.
     builder.Configuration["Serilog:WriteTo:1:Args:configureLogger:WriteTo:0:Args:path"] = applicationLog;
     builder.Configuration["Serilog:WriteTo:2:Args:configureLogger:WriteTo:0:Args:path"] = efLog;
+}
+
+// Fail fast instead of starting a production worker against an old schema.
+static async Task VerifyEmailingS20SchemaAsync(WebApplication app)
+{
+    if (!app.Environment.IsProduction()) return;
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<EmailingDbContext>();
+    var connection = db.Database.GetDbConnection();
+    var closeAfter = connection.State != System.Data.ConnectionState.Open;
+    if (closeAfter) await connection.OpenAsync();
+    try
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT "IdempotencyKey", "PayloadSha256", "DispatchLeaseId"
+            FROM emailing."EmailMessages" LIMIT 0
+            """;
+        await command.ExecuteNonQueryAsync();
+        command.CommandText = """
+            SELECT COUNT(*) FROM pg_indexes
+            WHERE schemaname = 'emailing'
+              AND tablename = 'EmailMessages'
+              AND indexname = 'IX_EmailMessages_IdempotencyKey'
+              AND indexdef ILIKE '%UNIQUE%'
+            """;
+        if (Convert.ToInt64(await command.ExecuteScalarAsync()) != 1)
+            throw new InvalidOperationException("The unique email idempotency index is missing.");
+    }
+    catch (Exception ex)
+    {
+        throw new InvalidOperationException(
+            "Itech.Emailing S20 schema is missing. Apply email migrations before Production startup.", ex);
+    }
+    finally { if (closeAfter) await connection.CloseAsync(); }
 }
 
 public partial class Program;

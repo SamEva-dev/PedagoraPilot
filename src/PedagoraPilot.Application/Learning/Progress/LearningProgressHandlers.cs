@@ -95,30 +95,30 @@ internal static class LearningProgressDtoFactory
     public static bool TryParseTopicEvaluationLevel(string value, out TopicEvaluationLevel level) => Enum.TryParse((value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty), true, out level);
 }
 
-public sealed class GetCompetencyDefinitionsQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetCompetencyDefinitionsQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
+public sealed class GetCompetencyDefinitionsQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<GetCompetencyDefinitionsQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
 {
     public async Task<IReadOnlyCollection<CompetencyDefinitionDto>> Handle(GetCompetencyDefinitionsQuery r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct);
         return (await definitions.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Definition(x, mapper)).ToArray();
     }
 }
 
 
-public sealed class GetCompetencyDefinitionCatalogQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetCompetencyDefinitionCatalogQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
+public sealed class GetCompetencyDefinitionCatalogQueryHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<GetCompetencyDefinitionCatalogQuery, IReadOnlyCollection<CompetencyDefinitionDto>>
 {
     public async Task<IReadOnlyCollection<CompetencyDefinitionDto>> Handle(GetCompetencyDefinitionCatalogQuery r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         return (await definitions.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId).OrderBy(x => x.SortOrder).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Definition(x, mapper)).ToArray();
     }
 }
 
-public sealed class CreateCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<CreateCompetencyDefinitionCommand, CompetencyDefinitionDto>
+public sealed class CreateCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<CreateCompetencyDefinitionCommand, CompetencyDefinitionDto>
 {
     public async Task<CompetencyDefinitionDto> Handle(CreateCompetencyDefinitionCommand r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         var code = (r.Code ?? string.Empty).Trim().ToUpperInvariant();
         if (await definitions.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Code == code, ct))
             throw new ConflictApplicationException(ErrorKeys.CompetencyCodeConflict);
@@ -139,14 +139,14 @@ public sealed class CreateCompetencyDefinitionCommandHandler(ICompetencyDefiniti
     }
 }
 
-public sealed class UpdateCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<UpdateCompetencyDefinitionCommand, CompetencyDefinitionDto>
+public sealed class UpdateCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<UpdateCompetencyDefinitionCommand, CompetencyDefinitionDto>
 {
     public async Task<CompetencyDefinitionDto> Handle(UpdateCompetencyDefinitionCommand r, CancellationToken ct)
     {
         var entity = await definitions.GetByIdAsync(r.CompetencyDefinitionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
         if (entity.ReferentialVersionId != r.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         var code = (r.Code ?? string.Empty).Trim().ToUpperInvariant();
         if (await definitions.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Code == code && x.Id != entity.Id, ct))
             throw new ConflictApplicationException(ErrorKeys.CompetencyCodeConflict);
@@ -168,14 +168,14 @@ public sealed class UpdateCompetencyDefinitionCommandHandler(ICompetencyDefiniti
     }
 }
 
-public sealed class DeleteCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IDrivingEvaluationRepository driving, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<DeleteCompetencyDefinitionCommand, bool>
+public sealed class DeleteCompetencyDefinitionCommandHandler(ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IDrivingEvaluationRepository driving, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<DeleteCompetencyDefinitionCommand, bool>
 {
     public async Task<bool> Handle(DeleteCompetencyDefinitionCommand r, CancellationToken ct)
     {
         var entity = await definitions.GetByIdAsync(r.CompetencyDefinitionId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CompetencyDefinitionNotFound);
         if (entity.ReferentialVersionId != r.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.CompetencyReferentialMismatch);
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         if (await definitions.Query(false).AnyAsync(x => x.ParentId == entity.Id, ct)
             || await records.Query(false).AnyAsync(x => x.CompetencyDefinitionId == entity.Id, ct)
             || await driving.Query(false).AnyAsync(x => x.CompetencyDefinitionId == entity.Id, ct))
@@ -232,29 +232,29 @@ public sealed class EvaluateCompetencyCommandHandler(IEnrollmentRepository enrol
     }
 }
 
-public sealed class GetPedagogicalTopicsQueryHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetPedagogicalTopicsQuery, IReadOnlyCollection<PedagogicalTopicDto>>
+public sealed class GetPedagogicalTopicsQueryHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<GetPedagogicalTopicsQuery, IReadOnlyCollection<PedagogicalTopicDto>>
 {
     public async Task<IReadOnlyCollection<PedagogicalTopicDto>> Handle(GetPedagogicalTopicsQuery r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct);
         return (await topics.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).OrderBy(x => x.Number).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Topic(x, mapper)).ToArray();
     }
 }
 
-public sealed class GetPedagogicalTopicCatalogQueryHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetPedagogicalTopicCatalogQuery, IReadOnlyCollection<PedagogicalTopicDto>>
+public sealed class GetPedagogicalTopicCatalogQueryHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<GetPedagogicalTopicCatalogQuery, IReadOnlyCollection<PedagogicalTopicDto>>
 {
     public async Task<IReadOnlyCollection<PedagogicalTopicDto>> Handle(GetPedagogicalTopicCatalogQuery r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct);
         return (await topics.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId).OrderBy(x => x.Number).ThenBy(x => x.Code).ToListAsync(ct)).Select(x => LearningProgressDtoFactory.Topic(x, mapper)).ToArray();
     }
 }
 
-public sealed class CreatePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<CreatePedagogicalTopicCommand, PedagogicalTopicDto>
+public sealed class CreatePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<CreatePedagogicalTopicCommand, PedagogicalTopicDto>
 {
     public async Task<PedagogicalTopicDto> Handle(CreatePedagogicalTopicCommand r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         if (await topics.Query(false).AnyAsync(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Number == r.Number, ct))
             throw new ConflictApplicationException(ErrorKeys.PedagogicalTopicNumberConflict);
 
@@ -275,7 +275,7 @@ public sealed class ImportTpEcsr58TopicsCommandHandler(
     IReferentialVersionRepository versions,
     IReferentialRepository referentials,
     IProgramOfferingRepository offerings,
-    ITrainingSiteRepository sites) : IRequestHandler<ImportTpEcsr58TopicsCommand, IReadOnlyCollection<PedagogicalTopicDto>>
+    ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<ImportTpEcsr58TopicsCommand, IReadOnlyCollection<PedagogicalTopicDto>>
 {
     private sealed record SeedTopic(int Number, string Title, string Category);
 
@@ -343,7 +343,7 @@ public sealed class ImportTpEcsr58TopicsCommandHandler(
 
     public async Task<IReadOnlyCollection<PedagogicalTopicDto>> Handle(ImportTpEcsr58TopicsCommand r, CancellationToken ct)
     {
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
 
         var existingNumbers = (await topics.Query(false)
             .Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Number.HasValue)
@@ -379,14 +379,14 @@ public sealed class ImportTpEcsr58TopicsCommandHandler(
     }
 }
 
-public sealed class UpdatePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<UpdatePedagogicalTopicCommand, PedagogicalTopicDto>
+public sealed class UpdatePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, IObjectMapper mapper, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<UpdatePedagogicalTopicCommand, PedagogicalTopicDto>
 {
     public async Task<PedagogicalTopicDto> Handle(UpdatePedagogicalTopicCommand r, CancellationToken ct)
     {
         var entity = await topics.GetByIdAsync(r.TopicId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PedagogicalTopicNotFound);
         if (entity.ReferentialVersionId != r.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.TopicReferentialMismatch);
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, entity.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, entity.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         if (await topics.Query(false).AnyAsync(x => x.ReferentialVersionId == entity.ReferentialVersionId && x.Number == r.Number && x.Id != entity.Id, ct))
             throw new ConflictApplicationException(ErrorKeys.PedagogicalTopicNumberConflict);
 
@@ -395,14 +395,14 @@ public sealed class UpdatePedagogicalTopicCommandHandler(IPedagogicalTopicReposi
     }
 }
 
-public sealed class DeletePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<DeletePedagogicalTopicCommand, bool>
+public sealed class DeletePedagogicalTopicCommandHandler(IPedagogicalTopicRepository topics, ILearnerTopicProgressRepository progress, ICurrentUser current, IReferentialVersionRepository versions, IReferentialRepository referentials, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ITrainingProgramRepository programs) : IRequestHandler<DeletePedagogicalTopicCommand, bool>
 {
     public async Task<bool> Handle(DeletePedagogicalTopicCommand r, CancellationToken ct)
     {
         var entity = await topics.GetByIdAsync(r.TopicId, true, ct) ?? throw new NotFoundApplicationException(ErrorKeys.PedagogicalTopicNotFound);
         if (entity.ReferentialVersionId != r.ReferentialVersionId)
             throw new ConflictApplicationException(ErrorKeys.TopicReferentialMismatch);
-        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, entity.ReferentialVersionId, versions, referentials, offerings, sites, ct, manage: true);
+        await TenantCatalogAccess.EnsureReferentialVersionAsync(current, entity.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct, manage: true);
         if (await progress.Query(false).AnyAsync(x => x.TopicId == entity.Id, ct))
             throw new ConflictApplicationException(ErrorKeys.PedagogicalTopicInUse);
         topics.Remove(entity);

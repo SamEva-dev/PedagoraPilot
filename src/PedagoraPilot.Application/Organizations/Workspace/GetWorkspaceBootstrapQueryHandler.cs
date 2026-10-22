@@ -145,7 +145,7 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
                 x.Email,
                 x.Manager,
                 x.Status.ToString().ToLowerInvariant(),
-                x.IsActive);
+                x.IsActive, x.ManagerAuthGateUserId);
         }).ToArray();
 
         var programDtos = pp.Select(p =>

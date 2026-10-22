@@ -1,6 +1,6 @@
 namespace PedagoraPilot.Contracts.Catalog;
 public sealed record ProgramFamilyDto(Guid Id, string Code, string Name, string Icon, bool Active);
-public sealed record TrainingProgramDto(Guid Id, string Key, string Code, string Name, string FamilyCode, string Category, string Icon, string DescriptionKey, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules, IReadOnlyCollection<string> SiteKeys, string? ReferenceVersion);
+public sealed record TrainingProgramDto(Guid Id, string Key, string Code, string Name, string FamilyCode, string Category, string Icon, string DescriptionKey, int DurationHours, string Status, IReadOnlyCollection<string> EnabledModules, IReadOnlyCollection<string> SiteKeys, string? ReferenceVersion, Guid? ResponsibleTrainerAuthGateUserId = null, string? ResponsibleTrainerDisplayName = null);
 public sealed record ProgramOfferingDto(Guid Id, string Key, Guid SiteId, string SiteKey, Guid ProgramId, string ProgramKey, bool Active);
 public sealed record CreateProgramRequest(
     string FamilyCode,
@@ -44,3 +44,5 @@ public sealed record ReferentialCompetencyDetailDto(Guid Id, Guid? ParentId, str
 public sealed record ReferentialCertificationStepDetailDto(Guid Id, string Code, string Title, string Kind, int DurationMinutes, int SortOrder);
 public sealed record ReferentialLinkedCohortDto(Guid Id, string Key, string Name, string SiteName, DateOnly StartDate, DateOnly EndDate, int StudentCount, string Status);
 public sealed record ReferentialVersionDetailsDto(Guid VersionId, int TopicCount, IReadOnlyCollection<ReferentialCompetencyDetailDto> Competencies, IReadOnlyCollection<string> WorkplacePeriodTypes, string CertificationSchemeName, IReadOnlyCollection<ReferentialCertificationStepDetailDto> CertificationSteps, IReadOnlyCollection<ReferentialLinkedCohortDto> LinkedCohorts);
+
+public sealed record AssignProgramResponsibleRequest(Guid AuthGateUserId);
