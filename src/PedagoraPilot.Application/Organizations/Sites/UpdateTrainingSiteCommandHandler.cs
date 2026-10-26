@@ -32,12 +32,16 @@ public sealed class UpdateTrainingSiteCommandHandler(ITrainingSiteRepository sit
             if (member is null || !member.IsActive)
                 throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
             var roleCodes = await members.GetRoleCodesAsync(request.OrganizationId, managerId, ct);
-            if (!roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
+            if (organization.OwnerUserId != managerId && !roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
                 throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
             managerName = member.DisplayName;
         }
         else if (!site.ManagerAuthGateUserId.HasValue &&
                  !string.Equals(request.Manager?.Trim(), site.Manager, StringComparison.Ordinal))
+            throw new ConflictApplicationException("SITE_MANAGER_ID_REQUIRED");
+
+        if (ParseStatus(request.Status) != TrainingSiteStatus.Inactive &&
+            !site.ManagerAuthGateUserId.HasValue && !request.ManagerAuthGateUserId.HasValue)
             throw new ConflictApplicationException("SITE_MANAGER_ID_REQUIRED");
 
         site.Update(request.Code, request.Name, request.City, request.Address, request.PostalCode,

@@ -23,6 +23,7 @@ public sealed class AccessController(
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
     IOrganizationMemberRepository members,
+    IOrganizationRepository organizations,
     IAccessInvitationRepository invitations,
     IUserBusinessAssignmentService businessAssignments,
     IApplicationIdentityAccess identityAccess,
@@ -35,6 +36,8 @@ public sealed class AccessController(
     {
         if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();
         var localAssignments = await businessAssignments.ListForOrganizationAsync(current.OrganizationId.Value, ct);
+        var organization = await organizations.GetByIdAsync(current.OrganizationId.Value, false, ct);
+        if (organization is null) return NotFound();
 
         // During the migration of access administration, active membership details still come from
         // AuthGate. Pedagora invitations are stripped from that response and replaced by the product-owned
@@ -70,6 +73,9 @@ public sealed class AccessController(
                         if (productRoles.Count > 0)
                             node["roles"] = JsonSerializer.SerializeToNode(productRoles);
                     }
+
+                    // Server-derived per-tenant ownership, never inferred from role labels.
+                    node["isOrganizationOwner"] = organization.OwnerUserId == authGateUserId;
 
                     // Business assignments belong to PedagoraPilot. Never expose AuthGate scope
                     // assignments in this product-facing list.

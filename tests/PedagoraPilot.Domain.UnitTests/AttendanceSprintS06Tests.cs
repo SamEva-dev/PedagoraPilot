@@ -106,6 +106,16 @@ public sealed class AttendanceSprintS06Tests
     }
 
     [Fact]
+    public void Fully_attended_session_does_not_create_catchup_flag()
+    {
+        var sheet = NewSheet();
+        sheet.Record(_learner, AttendanceStatus.Present, Start, End, 120, true, null, Start, End);
+        var entry = sheet.Entries.Single();
+        entry.AddToCatchup.Should().BeFalse();
+        entry.CatchupMinutes.Should().Be(0);
+    }
+
+    [Fact]
     public void Sheet_version_advances_after_recorded_mutation()
     {
         var sheet = NewSheet();

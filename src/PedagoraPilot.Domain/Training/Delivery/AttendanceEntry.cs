@@ -79,7 +79,7 @@ public sealed class AttendanceEntry : Entity<AttendanceEntryId>
         DepartureAtUtc = departureAtUtc?.ToUniversalTime();
         PresentMinutes = resolvedPresent;
         MissedMinutes = ExpectedMinutes - resolvedPresent;
-        AddToCatchup = addToCatchup && status != AttendanceStatus.Excused;
+        AddToCatchup = addToCatchup && status != AttendanceStatus.Excused && MissedMinutes > 0;
         CatchupMinutes = AddToCatchup ? MissedMinutes : 0;
         Comment = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
     }

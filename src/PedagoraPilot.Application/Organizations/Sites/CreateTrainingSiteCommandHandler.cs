@@ -40,11 +40,11 @@ public sealed class CreateTrainingSiteCommandHandler : IRequestHandler<CreateTra
             if (member is null || !member.IsActive)
                 throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
             var roleCodes = await _members.GetRoleCodesAsync(r.OrganizationId, managerId, ct);
-            if (!roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
+            if (org.OwnerUserId != managerId && !roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
                 throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
             site.AssignManager(managerId, member.DisplayName);
         }
-        else
+        else if (status != TrainingSiteStatus.Inactive)
             throw new ConflictApplicationException("SITE_MANAGER_ID_REQUIRED");
         await _sites.AddAsync(site, ct);
         return ToDto(site, org.Code.Value);
