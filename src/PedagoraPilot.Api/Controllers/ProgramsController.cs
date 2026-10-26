@@ -11,7 +11,7 @@ namespace PedagoraPilot.Api.Controllers;
 public sealed class ProgramsController(IMediator mediator) : ControllerBase
 {
     [HttpGet, HasPermission(PedagoraPilotPermissionCodes.Programs.View)]
-    public Task<IReadOnlyCollection<TrainingProgramDto>> Get([FromQuery] Guid? organizationId, CancellationToken ct) => mediator.Send(new GetProgramsQuery(organizationId), ct);
+    public Task<IReadOnlyCollection<TrainingProgramDto>> Get([FromQuery] Guid? organizationId, [FromQuery] Guid? siteId, CancellationToken ct) => mediator.Send(new GetProgramsQuery(organizationId, siteId), ct);
     
     [HttpPost, HasPermission(PedagoraPilotPermissionCodes.Programs.Manage)]
     public async Task<ActionResult<TrainingProgramDto>> Create(CreateProgramRequest r, CancellationToken ct)

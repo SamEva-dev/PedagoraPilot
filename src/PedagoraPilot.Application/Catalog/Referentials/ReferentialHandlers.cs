@@ -8,19 +8,21 @@ using PedagoraPilot.Domain.Catalog;
 using PedagoraPilot.Domain.Certification;
 
 namespace PedagoraPilot.Application.Catalog.Referentials;
-public sealed record GetReferentialsQuery(Guid? ProgramId = null) : IRequest<IReadOnlyCollection<ReferentialVersionDto>>;
+public sealed record GetReferentialsQuery(Guid? ProgramId = null, Guid? SiteId = null) : IRequest<IReadOnlyCollection<ReferentialVersionDto>>;
 public sealed class GetReferentialsQueryHandler(IReferentialRepository referentials, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ICurrentUser current) : IRequestHandler<GetReferentialsQuery, IReadOnlyCollection<ReferentialVersionDto>>
 {
     public async Task<IReadOnlyCollection<ReferentialVersionDto>> Handle(GetReferentialsQuery q, CancellationToken ct)
     {
         var organizationId = TenantScope.Organization(current);
         Guid[]? permittedProgramIds = null;
+        if (q.SiteId.HasValue && !current.CanViewSite(q.SiteId.Value))
+            return Array.Empty<ReferentialVersionDto>();
         if (organizationId.HasValue)
         {
             // Tenant-owned programs belong to the organization even before they are attached
             // to a site. Their initial referential/version is created with the program and must
             // therefore be visible immediately in the "Version source" selector.
-            var tenantOwnedProgramIds = current.HasContextualScopeRestrictions
+            var tenantOwnedProgramIds = q.SiteId.HasValue || current.HasContextualScopeRestrictions
                 ? Array.Empty<Guid>()
                 : await programs.Query(false)
                     .Where(x => x.OrganizationId == organizationId.Value)
@@ -30,6 +32,7 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
             var paths = await (from offering in offerings.Query(false)
                                join site in sites.Query(false) on offering.SiteId equals site.Id
                                where offering.IsActive && site.OrganizationId == organizationId.Value
+                                   && (!q.SiteId.HasValue || site.Id == q.SiteId.Value)
                                select new { SiteId = site.Id, offering.ProgramId }).ToArrayAsync(ct);
 
             var offeredProgramIds = paths
@@ -40,6 +43,13 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
                 .Concat(offeredProgramIds)
                 .Distinct()
                 .ToArray();
+        }
+        if (!organizationId.HasValue && q.SiteId.HasValue)
+        {
+            var idPermitted = await offerings.Query(false)
+                .Where(x => x.IsActive && x.SiteId == q.SiteId.Value)
+                .Select(x => x.ProgramId).Distinct().ToArrayAsync(ct);
+            permittedProgramIds = idPermitted;
         }
         var rs = await referentials.Query(false)
             .Where(x => (!q.ProgramId.HasValue || x.ProgramId == q.ProgramId)

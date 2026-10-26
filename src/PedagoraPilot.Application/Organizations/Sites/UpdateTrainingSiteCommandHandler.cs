@@ -28,13 +28,27 @@ public sealed class UpdateTrainingSiteCommandHandler(ITrainingSiteRepository sit
         string managerName = site.Manager;
         if (request.ManagerAuthGateUserId is Guid managerId)
         {
-            var member = await members.GetByAuthGateUserAsync(request.OrganizationId, managerId, false, ct);
-            if (member is null || !member.IsActive)
-                throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
-            var roleCodes = await members.GetRoleCodesAsync(request.OrganizationId, managerId, ct);
-            if (organization.OwnerUserId != managerId && !roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
-                throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
-            managerName = member.DisplayName;
+            // The verified organization owner may manage their own sites even if
+            // AuthGate provisioning did not create an OrganizationMember row.
+            if (managerId == organization.OwnerUserId)
+            {
+                var ownerMember = await members.GetByAuthGateUserAsync(request.OrganizationId, managerId, false, ct);
+                managerName = !string.IsNullOrWhiteSpace(ownerMember?.DisplayName)
+                    ? ownerMember.DisplayName
+                    : current.UserId == managerId && !string.IsNullOrWhiteSpace(current.DisplayName)
+                        ? current.DisplayName
+                        : organization.OwnerEmail;
+            }
+            else
+            {
+                var member = await members.GetByAuthGateUserAsync(request.OrganizationId, managerId, false, ct);
+                if (member is null || !member.IsActive)
+                    throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
+                var roleCodes = await members.GetRoleCodesAsync(request.OrganizationId, managerId, ct);
+                if (!roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
+                    throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
+                managerName = member.DisplayName;
+            }
         }
         else if (!site.ManagerAuthGateUserId.HasValue &&
                  !string.Equals(request.Manager?.Trim(), site.Manager, StringComparison.Ordinal))

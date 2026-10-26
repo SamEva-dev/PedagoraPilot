@@ -36,13 +36,29 @@ public sealed class CreateTrainingSiteCommandHandler : IRequestHandler<CreateTra
             r.Address, r.PostalCode, r.Phone, r.Email, r.Manager, status);
         if (r.ManagerAuthGateUserId is Guid managerId)
         {
-            var member = await _members.GetByAuthGateUserAsync(r.OrganizationId, managerId, false, ct);
-            if (member is null || !member.IsActive)
-                throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
-            var roleCodes = await _members.GetRoleCodesAsync(r.OrganizationId, managerId, ct);
-            if (org.OwnerUserId != managerId && !roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
-                throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
-            site.AssignManager(managerId, member.DisplayName);
+            // Organization ownership is authoritative even when the owner has no
+            // OrganizationMember row (e.g. an organization provisioned by AuthGate).
+            // Never waive membership or role checks for another identity.
+            if (managerId == org.OwnerUserId)
+            {
+                var ownerMember = await _members.GetByAuthGateUserAsync(r.OrganizationId, managerId, false, ct);
+                var ownerName = !string.IsNullOrWhiteSpace(ownerMember?.DisplayName)
+                    ? ownerMember.DisplayName
+                    : _current.UserId == managerId && !string.IsNullOrWhiteSpace(_current.DisplayName)
+                        ? _current.DisplayName
+                        : org.OwnerEmail;
+                site.AssignManager(managerId, ownerName);
+            }
+            else
+            {
+                var member = await _members.GetByAuthGateUserAsync(r.OrganizationId, managerId, false, ct);
+                if (member is null || !member.IsActive)
+                    throw new ConflictApplicationException("SITE_MANAGER_MEMBER_REQUIRED");
+                var roleCodes = await _members.GetRoleCodesAsync(r.OrganizationId, managerId, ct);
+                if (!roleCodes.Any(x => x.Equals("PedagoraPilot.SiteDirection", StringComparison.OrdinalIgnoreCase)))
+                    throw new ConflictApplicationException("SITE_MANAGER_DIRECTION_REQUIRED");
+                site.AssignManager(managerId, member.DisplayName);
+            }
         }
         else if (status != TrainingSiteStatus.Inactive)
             throw new ConflictApplicationException("SITE_MANAGER_ID_REQUIRED");

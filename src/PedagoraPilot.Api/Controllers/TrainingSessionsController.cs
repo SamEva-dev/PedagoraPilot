@@ -14,7 +14,7 @@ namespace PedagoraPilot.Api.Controllers;
 public sealed class TrainingSessionsController(IMediator mediator, ICurrentUser currentUser) : ControllerBase
 {
     [HttpGet, HasPermission(PedagoraPilotPermissionCodes.Sessions.View)]
-    public Task<IReadOnlyCollection<TrainingSessionDto>> Get([FromQuery] Guid? cohortId, [FromQuery] DateTimeOffset? fromUtc, [FromQuery] DateTimeOffset? toUtc, [FromQuery] string? type, [FromQuery] string? status, CancellationToken ct) => mediator.Send(new GetTrainingSessionsQuery(cohortId.HasValue ? new CohortId(cohortId.Value) : null, fromUtc, toUtc, type, status), ct);
+    public Task<IReadOnlyCollection<TrainingSessionDto>> Get([FromQuery] Guid? cohortId, [FromQuery] DateTimeOffset? fromUtc, [FromQuery] DateTimeOffset? toUtc, [FromQuery] string? type, [FromQuery] string? status, [FromQuery] Guid? siteId, [FromQuery] Guid? programId, CancellationToken ct) => mediator.Send(new GetTrainingSessionsQuery(cohortId.HasValue ? new CohortId(cohortId.Value) : null, fromUtc, toUtc, type, status, siteId, programId), ct);
     [HttpGet("{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Sessions.View)]
     public Task<TrainingSessionDto> GetById(Guid id, CancellationToken ct) => mediator.Send(new GetTrainingSessionQuery(new TrainingSessionId(id)), ct);
     [HttpPost, HasPermission(PedagoraPilotPermissionCodes.Sessions.Manage)]

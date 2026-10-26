@@ -5,7 +5,7 @@ using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Contracts.Catalog;
 
 namespace PedagoraPilot.Application.Catalog.Programs;
-public sealed record GetProgramsQuery(Guid? OrganizationId = null) : IRequest<IReadOnlyCollection<TrainingProgramDto>>;
+public sealed record GetProgramsQuery(Guid? OrganizationId = null, Guid? SiteId = null) : IRequest<IReadOnlyCollection<TrainingProgramDto>>;
 public sealed class GetProgramsQueryHandler(ITrainingProgramRepository programs, IProgramFamilyRepository families, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, IReferentialVersionRepository versions, IReferentialRepository refs, ICurrentUser current) : IRequestHandler<GetProgramsQuery, IReadOnlyCollection<TrainingProgramDto>>
 {
     public async Task<IReadOnlyCollection<TrainingProgramDto>> Handle(GetProgramsQuery r, CancellationToken ct)
@@ -26,7 +26,7 @@ public sealed class GetProgramsQueryHandler(ITrainingProgramRepository programs,
         if (current.HasContextualScopeRestrictions)
             siteList = siteList.Where(x => current.CanViewSite(x.Id)).ToList();
         var ss = siteList.ToDictionary(x => x.Id);
-        var siteIds = ss.Keys.ToArray();
+        var siteIds = ss.Keys.Where(id => !r.SiteId.HasValue || id == r.SiteId.Value).ToArray();
         var os = await offerings.Query(false)
             .Where(x => x.IsActive && siteIds.Contains(x.SiteId)).ToListAsync(ct);
         if (current.HasContextualScopeRestrictions)
@@ -37,7 +37,7 @@ public sealed class GetProgramsQueryHandler(ITrainingProgramRepository programs,
         foreach (var p in ps)
         {
             var siteKeys = os.Where(x => x.ProgramId == p.Id).Select(x => ss.TryGetValue(x.SiteId, out var s) ? s.ExternalKey ?? s.Id.ToString() : x.SiteId.ToString()).ToArray();
-            if (effectiveOrganization.HasValue && !p.OrganizationId.HasValue && !os.Any(x => x.ProgramId == p.Id))
+            if ((r.SiteId.HasValue || (effectiveOrganization.HasValue && !p.OrganizationId.HasValue)) && !os.Any(x => x.ProgramId == p.Id))
                 continue;
             var rid = rs.FirstOrDefault(x => x.ProgramId == p.Id)?.Id;
             var rv = rid.HasValue ? vs.FirstOrDefault(x => x.ReferentialId == rid.Value) : null;

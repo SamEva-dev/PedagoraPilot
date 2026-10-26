@@ -236,6 +236,21 @@ public sealed class GetTrainingSessionsQueryHandler(ITrainingSessionRepository s
             var ownCohortIds = own.Select(x => x.CohortId).Distinct().ToArray();
             query = query.Where(x => ownCohortIds.Contains(x.CohortId));
         }
+        if (request.SiteId.HasValue || request.ProgramId.HasValue)
+        {
+            var scopedCohorts = cohorts.Query(false);
+            if (request.SiteId.HasValue)
+                scopedCohorts = scopedCohorts.Where(x => x.SiteId == request.SiteId.Value);
+            if (request.ProgramId.HasValue)
+            {
+                var offeringIds = await offerings.Query(false)
+                    .Where(x => x.ProgramId == request.ProgramId.Value)
+                    .Select(x => x.Id).ToArrayAsync(ct);
+                scopedCohorts = scopedCohorts.Where(x => offeringIds.Contains(x.ProgramOfferingId));
+            }
+            var allowedCohortIds = await scopedCohorts.Select(x => x.Id).ToArrayAsync(ct);
+            query = query.Where(x => allowedCohortIds.Contains(x.CohortId));
+        }
         if (request.CohortId.HasValue)
             query = query.Where(x => x.CohortId == request.CohortId.Value);
         if (request.FromUtc.HasValue)

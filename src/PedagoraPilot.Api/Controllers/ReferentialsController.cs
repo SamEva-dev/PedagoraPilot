@@ -11,7 +11,7 @@ namespace PedagoraPilot.Api.Controllers;
 public sealed class ReferentialsController(IMediator mediator) : ControllerBase
 {
     [HttpGet("api/v1/referentials"), HasPermission(PedagoraPilotPermissionCodes.Referentials.View)]
-    public Task<IReadOnlyCollection<ReferentialVersionDto>> Get([FromQuery] Guid? programId, CancellationToken ct) => mediator.Send(new GetReferentialsQuery(programId), ct);
+    public Task<IReadOnlyCollection<ReferentialVersionDto>> Get([FromQuery] Guid? programId, [FromQuery] Guid? siteId, CancellationToken ct) => mediator.Send(new GetReferentialsQuery(programId, siteId), ct);
     [HttpGet("api/v1/referential-versions/{versionId:guid}"), HasPermission(PedagoraPilotPermissionCodes.Referentials.View)]
     public Task<ReferentialVersionDetailsDto> GetDetails(Guid versionId, CancellationToken ct) => mediator.Send(new GetReferentialVersionDetailsQuery(versionId), ct);
     [HttpPost("api/v1/referentials/{referentialId:guid}/versions"), HasPermission(PedagoraPilotPermissionCodes.Referentials.Manage)]
