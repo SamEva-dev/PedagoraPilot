@@ -95,7 +95,15 @@ public sealed class AccessInvitationProcessor(
                 {
                     member.SynchronizeIdentity(invitation.Email, invitation.FirstName, invitation.LastName, true);
                 }
-                await members.SyncRoleProfilesAsync(member, new[] { invitation.RequestedRole }, true, txCt);
+                // Merge only the roles for THIS organization. An invitation must not
+                // deactivate another legitimate role/profile held by this member.
+                var existingRoles = await members.GetRoleCodesAsync(
+                    invitation.OrganizationId, provisioned.UserId, txCt);
+                var desiredRoles = existingRoles
+                    .Append(invitation.RequestedRole)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                await members.SyncRoleProfilesAsync(member, desiredRoles, true, txCt);
 
                 if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
                     await studentMembers.EnsureAsync(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName, invitation.CohortId, invitation.Phone, invitation.BirthDate, invitation.EnrolledOn, txCt);
