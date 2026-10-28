@@ -151,8 +151,8 @@ public sealed class AccessController(
     [AllowAnonymous, HttpPost("invitations/accept")]
     public async Task<IActionResult> AcceptInvitation([FromBody] AcceptInvitationRequest body, [FromServices] IAccessInvitationProcessor processor, CancellationToken ct)
     {
-        var userId = await processor.AcceptAsync(body.Token, body.Password, ct);
-        return Ok(new { userId, status = "Accepted" });
+        var result = await processor.AcceptAsync(body.Token, body.Password, ct);
+        return Ok(new { userId = result.UserId, email = result.Email, status = "Accepted" });
     }
 
     [HttpDelete("invitations/{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]

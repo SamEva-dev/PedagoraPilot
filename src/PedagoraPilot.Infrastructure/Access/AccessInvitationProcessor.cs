@@ -58,7 +58,7 @@ public sealed class AccessInvitationProcessor(
             cancellationToken: ct);
     }
 
-    public async Task<Guid> AcceptAsync(string token, string? password, CancellationToken ct = default)
+    public async Task<AcceptedAccessInvitationResult> AcceptAsync(string token, string? password, CancellationToken ct = default)
     {
         var hash = AccessInvitation.ComputeTokenHash(token);
         var invitation = await invitations.GetByTokenHashAsync(hash, true, ct)
@@ -68,7 +68,10 @@ public sealed class AccessInvitationProcessor(
         var bypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
         if (!bypass && string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("ACCESS_INVITATION_PASSWORD_REQUIRED");
-        return await AcceptCoreAsync(invitation, password, emailConfirmed: bypass, ct);
+        // Possession of the valid, single-use invitation token proves control of the invited address.
+        // The identity must therefore be confirmed for this invitation even when bypass is disabled.
+        var userId = await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct);
+        return new AcceptedAccessInvitationResult(userId, invitation.Email);
     }
 
     private async Task<Guid> AcceptCoreAsync(AccessInvitation invitation, string? password, bool emailConfirmed, CancellationToken ct)
@@ -95,15 +98,7 @@ public sealed class AccessInvitationProcessor(
                 {
                     member.SynchronizeIdentity(invitation.Email, invitation.FirstName, invitation.LastName, true);
                 }
-                // Merge only the roles for THIS organization. An invitation must not
-                // deactivate another legitimate role/profile held by this member.
-                var existingRoles = await members.GetRoleCodesAsync(
-                    invitation.OrganizationId, provisioned.UserId, txCt);
-                var desiredRoles = existingRoles
-                    .Append(invitation.RequestedRole)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                await members.SyncRoleProfilesAsync(member, desiredRoles, true, txCt);
+                await members.SyncRoleProfilesAsync(member, new[] { invitation.RequestedRole }, true, txCt);
 
                 if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
                     await studentMembers.EnsureAsync(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName, invitation.CohortId, invitation.Phone, invitation.BirthDate, invitation.EnrolledOn, txCt);
