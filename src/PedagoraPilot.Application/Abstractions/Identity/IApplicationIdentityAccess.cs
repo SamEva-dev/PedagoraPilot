@@ -18,6 +18,7 @@ public sealed record SetApplicationRoleRequest(
 
 public interface IApplicationIdentityAccess
 {
+    Task<bool> ExistingActiveIdentityAsync(string email, CancellationToken cancellationToken = default);
     Task<EnsureApplicationIdentityResult> EnsureAsync(EnsureApplicationIdentityRequest request, CancellationToken cancellationToken = default);
     Task SetRoleAsync(SetApplicationRoleRequest request, CancellationToken cancellationToken = default);
 }

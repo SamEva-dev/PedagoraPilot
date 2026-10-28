@@ -58,6 +58,18 @@ public sealed class AccessInvitationProcessor(
             cancellationToken: ct);
     }
 
+    public async Task<AccessInvitationPreparation> PrepareAsync(string token, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("ACCESS_INVITATION_INVALID_OR_EXPIRED");
+        var hash = AccessInvitation.ComputeTokenHash(token);
+        var invitation = await invitations.GetByTokenHashAsync(hash, false, ct)
+            ?? throw new InvalidOperationException("ACCESS_INVITATION_NOT_FOUND");
+        if (!invitation.MatchesToken(token) || !invitation.IsUsable(DateTime.UtcNow))
+            throw new InvalidOperationException("ACCESS_INVITATION_INVALID_OR_EXPIRED");
+        var existingActive = await identity.ExistingActiveIdentityAsync(invitation.Email, ct);
+        return new AccessInvitationPreparation(invitation.Email, existingActive);
+    }
+
     public async Task<AcceptedAccessInvitationResult> AcceptAsync(string token, string? password, CancellationToken ct = default)
     {
         var hash = AccessInvitation.ComputeTokenHash(token);
@@ -66,8 +78,11 @@ public sealed class AccessInvitationProcessor(
         if (!invitation.MatchesToken(token) || !invitation.IsUsable(DateTime.UtcNow))
             throw new InvalidOperationException("ACCESS_INVITATION_INVALID_OR_EXPIRED");
         var bypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
-        if (!bypass && string.IsNullOrWhiteSpace(password))
+        var existingActive = await identity.ExistingActiveIdentityAsync(invitation.Email, ct);
+        if (!bypass && !existingActive && string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("ACCESS_INVITATION_PASSWORD_REQUIRED");
+        // Existing AuthGate identities retain their password; never overwrite or reset it.
+        if (existingActive) password = null;
         // Possession of the valid, single-use invitation token proves control of the invited address.
         // The identity must therefore be confirmed for this invitation even when bypass is disabled.
         var userId = await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct);

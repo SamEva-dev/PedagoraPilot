@@ -146,6 +146,17 @@ public sealed class AccessController(
         return Ok(new { id = result.Id, result.Email, result.FirstName, result.LastName, role = result.Role, status = result.Status });
     }
 
+    public sealed record PrepareInvitationRequest(string Token);
+
+    [AllowAnonymous, HttpPost("invitations/prepare")]
+    public async Task<IActionResult> PrepareInvitation([FromBody] PrepareInvitationRequest body,
+        [FromServices] IAccessInvitationProcessor processor, CancellationToken ct)
+    {
+        var result = await processor.PrepareAsync(body.Token, ct);
+        Response.Headers.CacheControl = "no-store";
+        return Ok(new { email = result.Email, existingActiveIdentity = result.ExistingActiveIdentity });
+    }
+
     public sealed record AcceptInvitationRequest(string Token, string? Password);
 
     [AllowAnonymous, HttpPost("invitations/accept")]

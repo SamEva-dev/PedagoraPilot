@@ -6,6 +6,22 @@ namespace PedagoraPilot.Infrastructure.Identity;
 
 public sealed class AuthGateApplicationIdentityAccess(IHttpClientFactory httpClientFactory, IConfiguration configuration) : IApplicationIdentityAccess
 {
+    public async Task<bool> ExistingActiveIdentityAsync(string email, CancellationToken cancellationToken = default)
+    {
+        var baseUrl = configuration["AuthGate:BaseUrl"]?.TrimEnd('/') ?? throw new InvalidOperationException("AuthGate:BaseUrl is required.");
+        var apiKey = configuration["AuthGate:InternalApplicationAccessApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey)) throw new InvalidOperationException("AuthGate:InternalApplicationAccessApiKey is required.");
+        using var message = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/internal/application-access/identity-status");
+        message.Headers.TryAddWithoutValidation("X-Internal-Api-Key", apiKey);
+        message.Content = JsonContent.Create(new { email });
+        var client = httpClientFactory.CreateClient("AuthGateInternalAccess");
+        using var response = await client.SendAsync(message, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdentityStatusResponse>(cancellationToken: cancellationToken);
+        return result?.ExistingActiveIdentity ?? throw new InvalidOperationException("Invalid identity status response.");
+    }
+    private sealed record IdentityStatusResponse(bool ExistingActiveIdentity);
+
     public async Task<EnsureApplicationIdentityResult> EnsureAsync(EnsureApplicationIdentityRequest request, CancellationToken cancellationToken = default)
     {
         var baseUrl = configuration["AuthGate:BaseUrl"]?.TrimEnd('/') ?? throw new InvalidOperationException("AuthGate:BaseUrl is required.");
