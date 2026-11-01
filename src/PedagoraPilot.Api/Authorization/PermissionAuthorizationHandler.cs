@@ -17,12 +17,11 @@ public sealed class PermissionAuthorizationHandler : AuthorizationHandler<Permis
         var granted = _currentUser.HasPermission(requirement.Permission);
 
         _logger.LogInformation(
-            "AUTH-DIAG: Permission={Permission}, Granted={Granted}, ClaimTypes={ClaimTypes}",
-            requirement.Permission,
-            granted,
-            string.Join(",", context.User.Claims
-                .Select(c => c.Type)
-                .Distinct()));
+                "AUTH-DIAG: Authenticated={Authenticated}, AuthType={AuthType}, Permission={Permission}, Granted={Granted}",
+                context.User.Identity?.IsAuthenticated ?? false,
+                context.User.Identity?.AuthenticationType ?? "none",
+                requirement.Permission,
+                _currentUser.HasPermission(requirement.Permission));
 
         if (granted)
         {

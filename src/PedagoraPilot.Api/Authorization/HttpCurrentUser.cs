@@ -25,8 +25,10 @@ public sealed class HttpCurrentUser : ICurrentUser
 
     public bool HasContextualScopeRestrictions =>
         !IsPlatformAdministrator
-        && ContextualScopes.Count > 0
-        && ContextualScopes.All(scope => scope.Level != ContextualScopeLevel.Organization);
+        && ((User.Identity?.AuthenticationType == "AuthGateOidcBusiness"
+                && ContextualScopes.All(scope => scope.Level != ContextualScopeLevel.Organization))
+            || (ContextualScopes.Count > 0
+                && ContextualScopes.All(scope => scope.Level != ContextualScopeLevel.Organization)));
 
     public bool HasPermission(string permission) => Permissions.Contains(permission) || IsPlatformAdministrator;
 

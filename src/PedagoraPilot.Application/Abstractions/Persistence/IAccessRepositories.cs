@@ -5,7 +5,9 @@ namespace PedagoraPilot.Application.Abstractions.Persistence;
 
 public interface IOrganizationMemberRepository : IRepository<OrganizationMember, OrganizationMemberId>
 {
+    Task<bool> HasMemberEmailAsync(Guid organizationId, string normalizedEmail, CancellationToken cancellationToken = default);
     Task<OrganizationMember?> GetByAuthGateUserAsync(Guid organizationId, Guid authGateUserId, bool isTracking = false, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<Guid>> ListActiveOrganizationIdsByAuthGateUserAsync(Guid authGateUserId, CancellationToken cancellationToken = default);
     Task SyncRoleProfilesAsync(OrganizationMember member, IReadOnlyCollection<string> roles, bool active, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<MemberDirectoryEntry>> GetTrainerDirectoryAsync(Guid organizationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<MemberDirectoryEntry>> GetStudentDirectoryAsync(Guid organizationId, CancellationToken cancellationToken = default);

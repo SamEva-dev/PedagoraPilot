@@ -70,7 +70,7 @@ public sealed class AccessInvitationProcessor(
         return new AccessInvitationPreparation(invitation.Email, existingActive);
     }
 
-    public async Task<AcceptedAccessInvitationResult> AcceptAsync(string token, string? password, CancellationToken ct = default)
+    public async Task<AcceptedAccessInvitationResult> AcceptAsync(string token, string? password, string? authenticatedEmail, CancellationToken ct = default, Guid? authenticatedSubject = null)
     {
         var hash = AccessInvitation.ComputeTokenHash(token);
         var invitation = await invitations.GetByTokenHashAsync(hash, true, ct)
@@ -81,15 +81,22 @@ public sealed class AccessInvitationProcessor(
         var existingActive = await identity.ExistingActiveIdentityAsync(invitation.Email, ct);
         if (!bypass && !existingActive && string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("ACCESS_INVITATION_PASSWORD_REQUIRED");
+        // A forwarded invitation link proves possession of the email message, not the
+        // identity owning an existing account. Require an authenticated subject with
+        // the exact verified email before granting an application membership.
+        if (existingActive && !string.Equals(authenticatedEmail?.Trim(), invitation.Email, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("ACCESS_INVITATION_AUTHENTICATION_REQUIRED");
         // Existing AuthGate identities retain their password; never overwrite or reset it.
         if (existingActive) password = null;
+        if (authenticatedSubject.HasValue && (!existingActive || authenticatedSubject.Value == Guid.Empty))
+            throw new UnauthorizedAccessException("ACCESS_INVITATION_OIDC_SUBJECT_INVALID");
         // Possession of the valid, single-use invitation token proves control of the invited address.
         // The identity must therefore be confirmed for this invitation even when bypass is disabled.
-        var userId = await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct);
+        var userId = await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct, authenticatedSubject);
         return new AcceptedAccessInvitationResult(userId, invitation.Email);
     }
 
-    private async Task<Guid> AcceptCoreAsync(AccessInvitation invitation, string? password, bool emailConfirmed, CancellationToken ct)
+    private async Task<Guid> AcceptCoreAsync(AccessInvitation invitation, string? password, bool emailConfirmed, CancellationToken ct, Guid? expectedOidcSubject = null)
     {
         invitation.MarkProcessing();
         await unitOfWork.SaveChangesAsync(ct);
@@ -97,7 +104,13 @@ public sealed class AccessInvitationProcessor(
         {
             var provisioned = await identity.EnsureAsync(new EnsureApplicationIdentityRequest(
                 invitation.OrganizationId, invitation.Email, invitation.FirstName, invitation.LastName,
-                invitation.RequestedRole, password, emailConfirmed), ct);
+                invitation.RequestedRole, password, emailConfirmed, expectedOidcSubject), ct);
+
+            // AuthGate is the authority for application access. A provisioning response
+            // describing inactive application access must never authorize a local membership,
+            // even if the identity itself is valid. Do not consume this invitation.
+            if (provisioned.UserId == Guid.Empty || !provisioned.AccessActive)
+                throw new UnauthorizedAccessException("ACCESS_APPLICATION_MEMBERSHIP_INACTIVE");
 
             // Keep member, learner, enrollment and invitation acceptance in ONE local DB transaction.
             // AuthGate is an external system and cannot participate in that transaction.
@@ -111,9 +124,21 @@ public sealed class AccessInvitationProcessor(
                 }
                 else
                 {
+                    // An invitation must never reactivate a suspended business membership.
+                    if (!member.IsActive)
+                        throw new UnauthorizedAccessException("ACCESS_MEMBER_INACTIVE");
+
                     member.SynchronizeIdentity(invitation.Email, invitation.FirstName, invitation.LastName, true);
                 }
-                await members.SyncRoleProfilesAsync(member, new[] { invitation.RequestedRole }, true, txCt);
+
+                // SyncRoleProfilesAsync synchronizes *all* role profile tables and deactivates
+                // roles absent from its input. Preserve existing active roles when accepting
+                // an additional invitation in the same organization.
+                var roleCodes = (await members.GetRoleCodesAsync(invitation.OrganizationId, provisioned.UserId, txCt))
+                    .Append(invitation.RequestedRole)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                await members.SyncRoleProfilesAsync(member, roleCodes, true, txCt);
 
                 if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
                     await studentMembers.EnsureAsync(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName, invitation.CohortId, invitation.Phone, invitation.BirthDate, invitation.EnrolledOn, txCt);

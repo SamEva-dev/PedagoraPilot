@@ -24,10 +24,27 @@ Log.Logger = new LoggerConfiguration().MinimumLevel.Information().MinimumLevel.O
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+    var oidcEnabled = builder.Configuration.GetValue<bool>("OidcApi:Enabled");
+
+    Console.WriteLine(
+        $"[T07] Environment = {builder.Environment.EnvironmentName}");
+
+    Console.WriteLine(
+        $"[T07] OIDC Enabled = {oidcEnabled}");
+
+    Console.WriteLine(
+        $"[T07] OIDC Issuer = {builder.Configuration["OidcApi:Issuer"]}");
+
+    Console.WriteLine(
+        $"[T07] OIDC Audience = {builder.Configuration["OidcApi:Audience"]}");
     ConfigureSerilogFilePaths(builder);
     builder.Host.UseSerilog((context, services, configuration) => configuration.ReadFrom.Configuration(context.Configuration).ReadFrom.Services(services).Enrich.FromLogContext());
     builder.Services.AddScoped<BrandingService>();
     builder.Services.AddControllers();
+    builder.Services.AddHttpClient("AuthGateOidcPermissions", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(5);
+    }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
     builder.Services.AddHttpClient("AuthGateAccess", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(30);
@@ -60,6 +77,20 @@ try
         });
     });
     var app = builder.Build();
+    if (app.Environment.IsDevelopment())
+    {
+        var provider = app.Services.GetRequiredService<
+            Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
+
+        var schemes = await provider.GetAllSchemesAsync();
+
+        foreach (var scheme in schemes)
+        {
+            app.Logger.LogInformation(
+                "[T07] Authentication scheme: {Scheme}",
+                scheme.Name);
+        }
+    }
 
     if (app.Environment.IsProduction() &&
         (!Enum.TryParse<QuestPDF.Infrastructure.LicenseType>(app.Configuration["Signatures:Pdf:QuestPdfLicense"], true, out var pdfLicense) || !Enum.IsDefined(pdfLicense)))
@@ -90,11 +121,13 @@ try
     app.UseHttpsRedirection();
     app.UseCors("Frontend");
     app.UseAuthentication();
+    app.UseMiddleware<OidcBusinessContextMiddleware>();
     app.UseMiddleware<TenantIdentityMiddleware>();
     app.UseAuthorization();
     app.UseMiddleware<IdempotencyMiddleware>();
     app.MapControllers();
-    app.MapHub<NotificationsHub>(builder.Configuration["Realtime:HubPath"] ?? "/hubs/notifications");
+    app.MapHub<NotificationsHub>(builder.Configuration["Realtime:HubPath"] ?? "/hubs/notifications",
+        options => options.CloseOnAuthenticationExpiration = true);
     app.MapBrevoTransactionalWebhook("/api/webhooks/brevo/transactional");
     await ApplyEmailingMigrationsAsync(app);
     await VerifyEmailingS20SchemaAsync(app);

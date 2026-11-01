@@ -58,6 +58,23 @@ public sealed class AuthGateJwtBearerOptionsConfigurator(
         {
             OnMessageReceived = async context =>
             {
+                // These endpoints explicitly require the separate AuthGateOidc scheme.
+                // The legacy Bearer handler is the default middleware scheme and must
+                // not try to validate an OIDC token against the legacy audience.
+                // NoResult() skips THIS handler only; the endpoint still validates the
+                // same token with AuthGateOidc (issuer, audience, signature, lifetime).
+                if (configuration.GetValue<bool>("OidcApi:Enabled"))
+                {
+                    var path = context.Request.Path;
+                    if (path.StartsWithSegments("/api/v1/oidc", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(path.Value, "/api/v1/session/bootstrap", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(path.Value, "/api/v1/session/context", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.NoResult();
+                        return;
+                    }
+                }
+
                 if (string.IsNullOrWhiteSpace(context.Token) &&
                     context.Request.Path.StartsWithSegments("/hubs/notifications"))
                 {

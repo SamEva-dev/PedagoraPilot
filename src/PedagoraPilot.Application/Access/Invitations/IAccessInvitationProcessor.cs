@@ -8,5 +8,5 @@ public interface IAccessInvitationProcessor
 {
     Task ProcessCreatedAsync(Guid invitationId, string token, Guid eventId, CancellationToken ct = default);
     Task<AccessInvitationPreparation> PrepareAsync(string token, CancellationToken ct = default);
-    Task<AcceptedAccessInvitationResult> AcceptAsync(string token, string? password, CancellationToken ct = default);
+    Task<AcceptedAccessInvitationResult> AcceptAsync(string token, string? password, string? authenticatedEmail, CancellationToken ct = default, Guid? authenticatedSubject = null);
 }

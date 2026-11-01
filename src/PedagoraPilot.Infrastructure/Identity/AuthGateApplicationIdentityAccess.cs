@@ -38,7 +38,8 @@ public sealed class AuthGateApplicationIdentityAccess(IHttpClientFactory httpCli
             request.LastName,
             role = request.Role,
             initialPassword = request.InitialPassword,
-            request.EmailConfirmed
+            request.EmailConfirmed,
+            expectedOidcSubject = request.ExpectedOidcSubject
         });
         var client = httpClientFactory.CreateClient("AuthGateInternalAccess");
         using var response = await client.SendAsync(message, cancellationToken);

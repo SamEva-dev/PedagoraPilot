@@ -9,7 +9,16 @@ public sealed class OrganizationMemberRepository(PedagoraPilotDbContext db) : IO
 {
     public IQueryable<OrganizationMember> Query(bool isTracking = false) => isTracking ? db.OrganizationMembers : db.OrganizationMembers.AsNoTracking();
     public Task<OrganizationMember?> GetByIdAsync(OrganizationMemberId id, bool isTracking = false, CancellationToken cancellationToken = default) => Query(isTracking).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public Task<bool> HasMemberEmailAsync(Guid organizationId, string normalizedEmail, CancellationToken cancellationToken = default) =>
+        Query().AnyAsync(x => x.OrganizationId == organizationId && x.Email.ToLower() == normalizedEmail, cancellationToken);
     public Task<OrganizationMember?> GetByAuthGateUserAsync(Guid organizationId, Guid authGateUserId, bool isTracking = false, CancellationToken cancellationToken = default) => Query(isTracking).FirstOrDefaultAsync(x => x.OrganizationId == organizationId && x.AuthGateUserId == authGateUserId, cancellationToken);
+    public async Task<IReadOnlyCollection<Guid>> ListActiveOrganizationIdsByAuthGateUserAsync(Guid authGateUserId, CancellationToken cancellationToken = default) =>
+        await db.OrganizationMembers.AsNoTracking()
+            .Where(member => member.AuthGateUserId == authGateUserId && member.IsActive)
+            .Select(member => member.OrganizationId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+
     public async Task AddAsync(OrganizationMember entity, CancellationToken cancellationToken = default) => await db.OrganizationMembers.AddAsync(entity, cancellationToken);
     public void Update(OrganizationMember entity) => db.OrganizationMembers.Update(entity);
     public void Remove(OrganizationMember entity) => db.OrganizationMembers.Remove(entity);

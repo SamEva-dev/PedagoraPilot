@@ -8,10 +8,12 @@ public sealed class NotificationsHub : Hub
     public override async Task OnConnectedAsync()
     {
         var rawOrganizationId = Context.User?.FindFirst("organization_id")?.Value ?? Context.User?.FindFirst("org_id")?.Value;
-        if (Guid.TryParse(rawOrganizationId, out var organizationId))
+        if (!Guid.TryParse(rawOrganizationId, out var organizationId) || organizationId == Guid.Empty)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(organizationId));
+            Context.Abort();
+            throw new HubException("realtime.organization_required");
         }
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(organizationId));
 
         await base.OnConnectedAsync();
     }

@@ -7,7 +7,8 @@ public sealed record EnsureApplicationIdentityRequest(
     string LastName,
     string Role,
     string? InitialPassword,
-    bool EmailConfirmed);
+    bool EmailConfirmed,
+    Guid? ExpectedOidcSubject = null);
 
 public sealed record EnsureApplicationIdentityResult(Guid UserId, bool ExistingIdentity, bool AccessActive);
 

@@ -1,0 +1,117 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+
+namespace PedagoraPilot.Api.Controllers;
+
+/// <summary>Fail-closed, audience-bound server-to-server lookup of effective permissions.</summary>
+internal static class OidcEffectivePermissionGateway
+{
+    internal sealed record Result(bool Resolved, bool Denied, string[] Permissions, string[] ExplicitAllowOverrides)
+    {
+        internal static Result Unavailable => new(false, false, [], []);
+        internal static Result Forbidden => new(false, true, [], []);
+    }
+
+    internal static async Task<Result> ResolveAsync(HttpContext context, IConfiguration config,
+        IHttpClientFactory factory, Guid subject, string applicationCode,
+        Guid? organizationId, CancellationToken ct)
+    {
+        var issuer = config["OidcApi:Issuer"];
+        if (!Uri.TryCreate(issuer, UriKind.Absolute, out var authority) ||
+            authority.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(authority.UserInfo) ||
+            !string.IsNullOrEmpty(authority.Query) ||
+            !string.IsNullOrEmpty(authority.Fragment) || subject == Guid.Empty)
+            return Result.Unavailable;
+
+        var rawAuthorization = context.Request.Headers.Authorization.ToString();
+        const string prefix = "Bearer ";
+        string accessToken;
+        if (rawAuthorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            accessToken = rawAuthorization[prefix.Length..].Trim();
+        }
+        else
+        {
+            // Query tokens only for authenticated SignalR hub endpoints.
+            var isHub = context.Request.Path.StartsWithSegments(
+                config["Realtime:HubPath"] ?? "/hubs/notifications", StringComparison.OrdinalIgnoreCase);
+            if (!isHub) return Result.Forbidden;
+            accessToken = context.Request.Query["access_token"].ToString();
+        }
+        if (string.IsNullOrWhiteSpace(accessToken) || accessToken.Length > 16 * 1024)
+            return Result.Forbidden;
+        // Do not forward a bearer token to redirects or caller-supplied URLs.
+        var path = "api/oidc/permissions/effective" +
+            (organizationId.HasValue ? "?organizationId=" + organizationId.Value.ToString("D") : "");
+        var url = new Uri(authority, path);
+        if (!string.Equals(url.GetLeftPart(UriPartial.Authority),
+            authority.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
+            return Result.Unavailable;
+        using var message = new HttpRequestMessage(HttpMethod.Get, url);
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        try
+        {
+            // The named HttpClient is configured with AllowAutoRedirect=false.
+            var client = factory.CreateClient("AuthGateOidcPermissions");
+            using var response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
+                return Result.Forbidden;
+            const int maximumResponseBytes = 64 * 1024;
+            if (response.StatusCode != HttpStatusCode.OK ||
+                response.Content.Headers.ContentLength is > maximumResponseBytes ||
+                !string.Equals(response.Content.Headers.ContentType?.MediaType,
+                    "application/json", StringComparison.OrdinalIgnoreCase))
+                return Result.Unavailable;
+
+            // A chunked response need not declare Content-Length. Parse only after a
+            // strict limit has been enforced on the bytes actually received.
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var bounded = new MemoryStream();
+            var buffer = new byte[8192];
+            int read;
+            while ((read = await stream.ReadAsync(buffer.AsMemory(), ct)) != 0)
+            {
+                if (bounded.Length + read > maximumResponseBytes) return Result.Unavailable;
+                bounded.Write(buffer, 0, read);
+            }
+            using var json = JsonDocument.Parse(bounded.ToArray(),
+                new JsonDocumentOptions { MaxDepth = 12 });
+            var root = json.RootElement;
+            if (!root.TryGetProperty("subject", out var incomingSubject) ||
+                !Guid.TryParse(incomingSubject.GetString(), out var returnedSubject) || returnedSubject != subject ||
+                !root.TryGetProperty("applicationCode", out var incomingApp) ||
+                !string.Equals(incomingApp.GetString(), applicationCode, StringComparison.OrdinalIgnoreCase) ||
+                !root.TryGetProperty("organizationId", out var incomingOrg) ||
+                (organizationId.HasValue != (incomingOrg.ValueKind != JsonValueKind.Null)) ||
+                (organizationId.HasValue && (!Guid.TryParse(incomingOrg.GetString(), out var returnedOrg) ||
+                    returnedOrg != organizationId.Value)) ||
+                !root.TryGetProperty("permissionsResolved", out var resolved) || resolved.ValueKind != JsonValueKind.True)
+                return Result.Unavailable;
+            var permissions = ReadCodes(root, "permissions");
+            var explicitAllows = ReadCodes(root, "explicitAllowOverrides");
+            // An override must be present in the effective permission list.
+            if (explicitAllows.Except(permissions, StringComparer.OrdinalIgnoreCase).Any())
+                return Result.Unavailable;
+            return new Result(true, false, permissions, explicitAllows);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return Result.Unavailable;
+        }
+    }
+
+    private static string[] ReadCodes(JsonElement root, string field)
+    {
+        if (!root.TryGetProperty(field, out var list) || list.ValueKind != JsonValueKind.Array ||
+            list.GetArrayLength() > 2048) throw new JsonException("Invalid permission list.");
+        var values = new List<string>();
+        foreach (var item in list.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || item.GetString() is not { Length: > 0 and <= 256 } code)
+                throw new JsonException("Invalid permission code.");
+            values.Add(code);
+        }
+        return values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+}

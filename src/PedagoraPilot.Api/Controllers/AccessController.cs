@@ -162,7 +162,16 @@ public sealed class AccessController(
     [AllowAnonymous, HttpPost("invitations/accept")]
     public async Task<IActionResult> AcceptInvitation([FromBody] AcceptInvitationRequest body, [FromServices] IAccessInvitationProcessor processor, CancellationToken ct)
     {
-        var result = await processor.AcceptAsync(body.Token, body.Password, ct);
+        // The bearer principal is optional for first-time invitees, but required
+        // by the processor when an identity already exists in AuthGate.
+        var authenticatedEmail = User.Identity?.IsAuthenticated == true
+            ? User.FindFirst("email")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            : null;
+        var preparation = await processor.PrepareAsync(body.Token, ct);
+        if (preparation.ExistingActiveIdentity &&
+            !string.Equals(authenticatedEmail?.Trim(), preparation.Email, StringComparison.OrdinalIgnoreCase))
+            return Unauthorized(new { code = "ACCESS_INVITATION_AUTHENTICATION_REQUIRED" });
+        var result = await processor.AcceptAsync(body.Token, body.Password, authenticatedEmail, ct);
         return Ok(new { userId = result.UserId, email = result.Email, status = "Accepted" });
     }
 

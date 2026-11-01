@@ -53,6 +53,54 @@ public static class AuthenticationExtensions
             })
             .AddJwtBearer();
 
+        // OIDC is an opt-in, identity-only scheme. Legacy JWT remains the default.
+        // No organization, role, or business permission is derived from the OIDC token.
+        if (configuration.GetValue<bool>("OidcApi:Enabled"))
+        {
+            var issuer = configuration["OidcApi:Issuer"];
+            var audience = configuration["OidcApi:Audience"];
+            if (!Uri.TryCreate(issuer, UriKind.Absolute, out var issuerUri) ||
+                issuerUri.Scheme != Uri.UriSchemeHttps ||
+                string.IsNullOrWhiteSpace(audience))
+                throw new InvalidOperationException("OidcApi Issuer (HTTPS) and Audience are required.");
+
+            services.AddAuthentication()
+                .AddJwtBearer("AuthGateOidc", options =>
+                {
+                    options.Authority = issuerUri.GetLeftPart(UriPartial.Authority);
+                    options.RequireHttpsMetadata = true;
+                    options.MapInboundClaims = false;
+                    options.IncludeErrorDetails = true;
+                    options.SaveToken = false;
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnMessageReceived = context =>
+                        {
+                            var hubPath = configuration["Realtime:HubPath"] ?? "/hubs/notifications";
+                            if (context.HttpContext.Request.Path.StartsWithSegments(hubPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var token = context.Request.Query["access_token"].ToString();
+                                if (!string.IsNullOrWhiteSpace(token)) context.Token = token;
+                            }
+                            return Task.CompletedTask;
+                        }
+                    };
+                    options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+                    {
+                        ValidateIssuer = true,
+                        ValidIssuer = issuerUri.AbsoluteUri,
+                        ValidateAudience = true,
+                        ValidAudience = audience,
+                        ValidateIssuerSigningKey = true,
+                        ValidateLifetime = true,
+                        RequireSignedTokens = true,
+                        RequireExpirationTime = true,
+                        ClockSkew = TimeSpan.FromSeconds(30),
+                        NameClaimType = "sub"
+                    };
+                });
+        }
+
         services.AddScoped<ICurrentUser, HttpCurrentUser>();
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();

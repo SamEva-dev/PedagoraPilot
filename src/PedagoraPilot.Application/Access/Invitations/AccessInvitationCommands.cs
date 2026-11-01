@@ -34,6 +34,7 @@ public sealed class CreateAccessInvitationCommandValidator : AbstractValidator<C
 public sealed class CreateAccessInvitationCommandHandler(
     ICurrentUser current,
     IAccessInvitationRepository invitations,
+    IOrganizationMemberRepository members,
     ICohortRepository cohorts,
     IProgramOfferingRepository offerings,
     IPersonRepository persons,
@@ -48,6 +49,9 @@ public sealed class CreateAccessInvitationCommandHandler(
         var role = NormalizeRole(request.Role) ?? throw new ValidationApplicationException("ACCESS_ROLE_INVALID");
         var email = (request.Email ?? string.Empty).Trim().ToLowerInvariant();
         if (email.Length == 0) throw new ValidationApplicationException("ACCESS_EMAIL_REQUIRED");
+        // Reject self-invitations independently of the eventual consistency of member projections.
+        if (string.Equals(email, current.Email?.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new ConflictApplicationException("ACCESS_CANNOT_INVITE_SELF");
         // A student invitation must point to a precise cohort: never provision an
         // unassigned learner from a broadly scoped access-management screen.
         if (string.Equals(role, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase)
@@ -56,6 +60,8 @@ public sealed class CreateAccessInvitationCommandHandler(
         // Serialize invitation creation per (organization, email) across all API instances.
         // UnitOfWorkBehavior holds the transaction through SaveChanges and commit.
         await invitations.AcquireCreationLockAsync(organizationId, email, ct);
+        if (await members.HasMemberEmailAsync(organizationId, email, ct))
+            throw new ConflictApplicationException("ACCESS_MEMBER_ALREADY_EXISTS");
         if (await invitations.HasPendingAsync(organizationId, email, ct)) throw new ConflictApplicationException("ACCESS_INVITATION_ALREADY_EXISTS");
 
         // Cohort drives the tenant/site/program relationship. Never trust a client-supplied
