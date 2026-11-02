@@ -1,4 +1,5 @@
 using DomainRelay.Abstractions;
+using PedagoraPilot.Application.Common.Errors;
 using PedagoraPilot.Application.Abstractions.Messaging;
 using PedagoraPilot.Contracts.Provisioning;
 
@@ -24,6 +25,11 @@ public sealed class SyncOrganizationMemberCommandHandler(
             throw new ArgumentException("OrganizationId and AuthGateUserId are required.");
         _ = await organizations.GetByIdAsync(request.OrganizationId, false, ct)
             ?? throw new PedagoraPilot.Application.Common.Errors.NotFoundApplicationException("ORGANIZATION_NOT_FOUND");
+
+        // Check every role synchronization, including outbox retries and reactivation.
+        // Reject incompatible role sets before touching the tracked member or its profiles.
+        if (!OrganizationRoleCompatibilityPolicy.IsAllowed(request.Roles))
+            throw new ConflictApplicationException(OrganizationRoleCompatibilityPolicy.ConflictKey);
 
         var member = await members.GetByAuthGateUserAsync(request.OrganizationId, request.AuthGateUserId, true, ct);
         if (member is null)

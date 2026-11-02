@@ -159,6 +159,12 @@ public sealed class UserBusinessAssignmentService(
         if (!actualRoles.Any(x => x.EndsWith(".Trainer", StringComparison.OrdinalIgnoreCase) || x.EndsWith(".PedagogicalManager", StringComparison.OrdinalIgnoreCase)))
             throw new ConflictApplicationException("ASSIGNMENT_ROLE_MISMATCH");
 
+        // A management assignment must fail before creating or activating a trainer assignment.
+        // It cannot silently succeed with a warning when another manager holds the cohort.
+        if (makePedagogicalManager && cohort.PedagogicalManagerAuthGateUserId.HasValue
+            && cohort.PedagogicalManagerAuthGateUserId.Value != authGateUserId)
+            throw new ConflictApplicationException("COHORT_PEDAGOGICAL_MANAGER_ALREADY_ASSIGNED");
+
         var assignment = await trainerAssignments.GetByUserAndCohortAsync(organizationId, authGateUserId, cohort.Id, true, ct);
         if (assignment is null)
         {
@@ -171,12 +177,8 @@ public sealed class UserBusinessAssignmentService(
         }
 
         string? warningKey = null;
-        if (makePedagogicalManager)
-        {
-            var accepted = cohort.TryAssignPedagogicalManager(authGateUserId, member.DisplayName);
-            if (!accepted)
-                warningKey = "access.assignments.responsibleAlreadyExists";
-        }
+        if (makePedagogicalManager && !cohort.TryAssignPedagogicalManager(authGateUserId, member.DisplayName))
+            throw new ConflictApplicationException("COHORT_PEDAGOGICAL_MANAGER_ALREADY_ASSIGNED");
 
         await unitOfWork.SaveChangesAsync(ct);
         return new UserBusinessAssignmentDto(

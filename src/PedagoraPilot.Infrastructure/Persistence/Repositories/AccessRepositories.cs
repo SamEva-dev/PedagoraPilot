@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PedagoraPilot.Application.Common.Errors;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Domain.Access;
 using PedagoraPilot.Domain.Identifiers;
@@ -26,6 +27,18 @@ public sealed class OrganizationMemberRepository(PedagoraPilotDbContext db) : IO
     public async Task SyncRoleProfilesAsync(OrganizationMember member, IReadOnlyCollection<string> roles, bool active, CancellationToken cancellationToken = default)
     {
         var normalized = roles.Select(NormalizeRole).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Application-level feedback across every path using profile synchronization.
+        // PostgreSQL filtered unique indexes remain the concurrency-safe final authority.
+        if (active && normalized.Contains("organization_direction")
+            && await db.OrganizationDirectionProfiles.AsNoTracking().AnyAsync(
+                x => x.OrganizationId == member.OrganizationId && x.MemberId != member.Id && x.IsActive,
+                cancellationToken))
+            throw new ConflictApplicationException("ACCESS_ORGANIZATION_DIRECTION_ALREADY_ASSIGNED");
+        if (active && normalized.Contains("site_direction")
+            && await db.SiteDirectionProfiles.AsNoTracking().AnyAsync(
+                x => x.OrganizationId == member.OrganizationId && x.MemberId != member.Id && x.IsActive,
+                cancellationToken))
+            throw new ConflictApplicationException("ACCESS_SITE_DIRECTION_ALREADY_ASSIGNED");
         await Sync(db.OrganizationAdministratorProfiles, member, normalized.Contains("organization_administrator"), active, () => new OrganizationAdministratorProfile(Guid.NewGuid(), member.Id, member.OrganizationId), cancellationToken);
         await Sync(db.OrganizationDirectionProfiles, member, normalized.Contains("organization_direction"), active, () => new OrganizationDirectionProfile(Guid.NewGuid(), member.Id, member.OrganizationId), cancellationToken);
         await Sync(db.SiteDirectionProfiles, member, normalized.Contains("site_direction"), active, () => new SiteDirectionProfile(Guid.NewGuid(), member.Id, member.OrganizationId), cancellationToken);

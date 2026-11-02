@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Text.Json;
 using DomainRelay.Abstractions;
 using DomainRelay.Mapping.Abstractions;
@@ -49,7 +50,7 @@ public sealed class GetCertificationSchemesQueryHandler(ICertificationSchemeRepo
     }
 }
 
-public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamSessionRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<GetCertificationExamSessionsQuery, IReadOnlyCollection<CertificationExamSessionDto>>
+public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamSessionRepository repo, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current, IConfiguration configuration) : IRequestHandler<GetCertificationExamSessionsQuery, IReadOnlyCollection<CertificationExamSessionDto>>
 {
     public async Task<IReadOnlyCollection<CertificationExamSessionDto>> Handle(GetCertificationExamSessionsQuery r, CancellationToken ct)
     {
@@ -61,16 +62,50 @@ public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamS
             q = q.Where(x => x.CohortId == r.CohortId.Value);
         var rows = await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct);
         rows = await CertificationContextualAccess.FilterSessionsAsync(rows, cohorts, offerings, current, ct);
-        if (CertificationActorAccess.IsJury(current) && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Certification.Manage))
+        if (CertificationActorAccess.HasJuryCapability(current) && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Certification.Manage))
         {
             if (!current.UserId.HasValue) return Array.Empty<CertificationExamSessionDto>();
             var assignedIds = await juries.Query(false)
                 .Where(x => x.OrganizationId == current.OrganizationId && x.AuthGateUserId == current.UserId.Value)
                 .Select(x => x.ExamSessionId)
                 .ToArrayAsync(ct);
-            rows = rows.Where(x => assignedIds.Contains(x.Id)).ToList();
+            var nowUtc = DateTimeOffset.UtcNow;
+            rows = rows.Where(x => assignedIds.Contains(x.Id)
+                && CertificationActorAccess.IsWithinJuryWindow(x, nowUtc, new JuryAccessWindowPolicy(configuration))).ToList();
         }
-        return rows.Select(CertMap.Session).ToArray();
+        var accessWindow = new JuryAccessWindowPolicy(configuration);
+        return rows.Select(x => CertMap.Session(x) with
+        {
+            JuryAccessValidFromUtc = accessWindow.ValidFrom(x),
+            JuryAccessValidUntilUtc = accessWindow.ValidUntil(x)
+        }).ToArray();
+    }
+}
+
+/// <summary>Read-only list scoped to an exam session and its organization.</summary>
+public sealed class GetCertificationJuryAssignmentsQueryHandler(
+    ICertificationExamSessionRepository sessions,
+    ICohortRepository cohorts,
+    IProgramOfferingRepository offerings,
+    IJuryAssignmentRepository juries,
+    ICurrentUser current,
+    IConfiguration configuration) : IRequestHandler<GetCertificationJuryAssignmentsQuery, IReadOnlyCollection<JuryAssignmentDto>>
+{
+    public async Task<IReadOnlyCollection<JuryAssignmentDto>> Handle(GetCertificationJuryAssignmentsQuery request, CancellationToken ct)
+    {
+        var session = await sessions.GetByIdAsync(request.SessionId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
+        TenantScope.Ensure(current, session.OrganizationId);
+        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        var window = new JuryAccessWindowPolicy(configuration);
+        var assignments = await juries.Query(false)
+            .Where(x => x.OrganizationId == session.OrganizationId && x.ExamSessionId == session.Id)
+            .OrderBy(x => x.AssignedAtUtc).ToListAsync(ct);
+        return assignments.Select(x => CertMap.Jury(x) with
+        {
+            AccessValidFromUtc = window.ValidFrom(session),
+            AccessValidUntilUtc = window.ValidUntil(session)
+        }).ToArray();
     }
 }
 
@@ -83,14 +118,14 @@ public sealed class GetCertificationCandidatesQueryHandler(
     ILearnerProfileRepository learnerProfiles,
     IPersonRepository people,
     IJuryAssignmentRepository juries,
-    ICurrentUser current) : IRequestHandler<GetCertificationCandidatesQuery, IReadOnlyCollection<CertificationCandidateDto>>
+    ICurrentUser current, IConfiguration configuration) : IRequestHandler<GetCertificationCandidatesQuery, IReadOnlyCollection<CertificationCandidateDto>>
 {
     public async Task<IReadOnlyCollection<CertificationCandidateDto>> Handle(GetCertificationCandidatesQuery r, CancellationToken ct)
     {
         var session = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, session.OrganizationId);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: false, ct);
-        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, new JuryAccessWindowPolicy(configuration), ct);
         var q = repo.Query(false).Include(x => x.Assessments).Where(x => x.ExamSessionId == r.SessionId).AsQueryable();
         var organizationId = TenantScope.Organization(current);
         if (organizationId.HasValue)
@@ -228,7 +263,7 @@ public sealed class EvaluateCertificationEligibilityCommandHandler(ICertificatio
     }
 }
 
-public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCandidateRepository candidates, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentCommand, CertificationCandidateDto>
+public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCandidateRepository candidates, ICertificationSchemeRepository schemes, ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, ICurrentUser current, IConfiguration configuration) : IRequestHandler<RecordCertificationAssessmentCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(RecordCertificationAssessmentCommand r, CancellationToken ct)
     {
@@ -236,7 +271,7 @@ public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCa
         TenantScope.Ensure(current, x.OrganizationId);
         var session = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
-        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
         // Recording marks/assessments is only legitimate while the exam is running.
         if (session.Status != CertificationExamSessionStatus.InProgress)
             throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
@@ -259,7 +294,7 @@ public sealed class RecordCertificationAssessmentBatchCommandHandler(
     ICohortRepository cohorts,
     IProgramOfferingRepository offerings,
     IJuryAssignmentRepository juries,
-    ICurrentUser current) : IRequestHandler<RecordCertificationAssessmentBatchCommand, CertificationCandidateDto>
+    ICurrentUser current, IConfiguration configuration) : IRequestHandler<RecordCertificationAssessmentBatchCommand, CertificationCandidateDto>
 {
     public async Task<CertificationCandidateDto> Handle(RecordCertificationAssessmentBatchCommand r, CancellationToken ct)
     {
@@ -270,7 +305,7 @@ public sealed class RecordCertificationAssessmentBatchCommandHandler(
         var session = await sessions.GetByIdAsync(candidate.ExamSessionId, false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
-        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
         if (session.Status != CertificationExamSessionStatus.InProgress)
             throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
         var scheme = await schemes.Query(false).Include(x => x.Steps)
@@ -337,7 +372,7 @@ public sealed class PublishCertificationResultsCommandHandler(ICertificationExam
     }
 }
 
-public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, IOrganizationMemberRepository members, ICurrentUser current) : IRequestHandler<AssignJuryCommand, JuryAssignmentDto>
+public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IJuryAssignmentRepository juries, IOrganizationMemberRepository members, ICurrentUser current, IConfiguration configuration) : IRequestHandler<AssignJuryCommand, JuryAssignmentDto>
 {
     public async Task<JuryAssignmentDto> Handle(AssignJuryCommand r, CancellationToken ct)
     {
@@ -367,6 +402,11 @@ public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository
             throw new ConflictApplicationException("CERTIFICATION_JURY_DISPLAY_NAME_REQUIRED");
         var j = JuryAssignment.Create(s.OrganizationId, s.Id, member.AuthGateUserId, displayName, r.Role);
         await juries.AddAsync(j, ct);
-        return CertMap.Jury(j);
+        var accessWindow = new JuryAccessWindowPolicy(configuration);
+        return CertMap.Jury(j) with
+        {
+            AccessValidFromUtc = accessWindow.ValidFrom(s),
+            AccessValidUntilUtc = accessWindow.ValidUntil(s)
+        };
     }
 }

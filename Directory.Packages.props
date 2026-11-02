@@ -16,6 +16,7 @@
     <PackageVersion Include="DomainRelay.Mapping.Expressions" Version="3.1.3" />
     <PackageVersion Include="Itech.Emailing" Version="2.0.4" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.14" />
     <PackageVersion Include="PedagoraPilot.Security.Contracts" Version="5.0.2" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />

@@ -71,6 +71,21 @@ public sealed class ExceptionHandlingMiddleware
             _logger.LogWarning(exception, "Concurrent jury assignment or enrollment rejected by unique index.");
             await WriteAsync(context, StatusCodes.Status409Conflict, errorKey);
         }
+        // Enforce single active director per organization even for concurrent requests.
+        // These are the two exact index names created by the IAM-02 bloc-3 migration.
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && (string.Equals(pg.ConstraintName, "UX_organization_direction_one_active_per_organization", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(pg.ConstraintName, "UX_site_direction_one_active_per_organization", StringComparison.OrdinalIgnoreCase)))
+        {
+            var directionPg = (Npgsql.PostgresException)exception.InnerException!;
+            var key = string.Equals(directionPg.ConstraintName, "UX_organization_direction_one_active_per_organization", StringComparison.OrdinalIgnoreCase)
+                ? "ACCESS_ORGANIZATION_DIRECTION_ALREADY_ASSIGNED"
+                : "ACCESS_SITE_DIRECTION_ALREADY_ASSIGNED";
+            _logger.LogWarning(exception, "Concurrent active direction assignment rejected by database constraint {ConstraintName}.", directionPg.ConstraintName);
+            await WriteAsync(context, StatusCodes.Status409Conflict, key);
+        }
         catch (UnauthorizedAccessException exception)
         {
             _logger.LogWarning(exception, "Unauthorized operation.");

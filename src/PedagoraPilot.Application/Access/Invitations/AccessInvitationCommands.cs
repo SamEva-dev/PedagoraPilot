@@ -143,7 +143,11 @@ public sealed class CancelAccessInvitationCommandHandler(ICurrentUser current, I
         var invitation = await invitations.GetByIdAsync(new AccessInvitationId(request.InvitationId), true, ct)
             ?? throw new NotFoundApplicationException("ACCESS_INVITATION_NOT_FOUND");
         if (invitation.OrganizationId != organizationId) throw new ForbiddenApplicationException("AUTH_FORBIDDEN");
-        invitation.Cancel();
+        // Only an unaccepted invitation may be deleted. Accepted invitations carry
+        // membership history and must be revoked through the membership workflow.
+        if (invitation.Status != AccessInvitationStatus.Pending)
+            throw new ConflictApplicationException("ACCESS_INVITATION_NOT_PENDING");
+        invitations.Remove(invitation);
         return true;
     }
 }

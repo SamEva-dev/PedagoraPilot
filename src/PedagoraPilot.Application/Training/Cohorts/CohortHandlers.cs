@@ -83,6 +83,10 @@ public sealed class ReassignCohortManagerCommandHandler(
 {
     public async Task<CohortDto> Handle(ReassignCohortManagerCommand request, CancellationToken ct)
     {
+        // Serialize manager transfers on the same cohort row within UnitOfWork.
+        // A tracked EF concurrency token alone cannot reliably reject two writers
+        // when no database-generated version is incremented.
+        await cohorts.LockForEnrollmentCapacityAsync(request.Id, ct);
         var cohort = await cohorts.GetByIdAsync(request.Id, true, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         TenantScope.Ensure(current, cohort.OrganizationId);

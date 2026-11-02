@@ -5,6 +5,7 @@ using PedagoraPilot.Application.Abstractions.Identity;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Access.Invitations;
 using PedagoraPilot.Application.Access.Members;
+using PedagoraPilot.Application.Common.Errors;
 using PedagoraPilot.Domain.Access;
 using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Security.Contracts;
@@ -138,6 +139,8 @@ public sealed class AccessInvitationProcessor(
                     .Append(invitation.RequestedRole)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
+                if (!OrganizationRoleCompatibilityPolicy.IsAllowed(roleCodes))
+                    throw new ConflictApplicationException(OrganizationRoleCompatibilityPolicy.ConflictKey);
                 await members.SyncRoleProfilesAsync(member, roleCodes, true, txCt);
 
                 if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))

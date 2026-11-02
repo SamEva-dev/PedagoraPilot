@@ -38,6 +38,8 @@ public sealed class AuthGateApplicationIdentityAccess(IHttpClientFactory httpCli
             request.LastName,
             role = request.Role,
             initialPassword = request.InitialPassword,
+            // The invitation holder just selected their own password; this is not a temporary password.
+            requirePasswordChange = false,
             request.EmailConfirmed,
             expectedOidcSubject = request.ExpectedOidcSubject
         });

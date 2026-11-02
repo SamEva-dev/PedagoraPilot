@@ -9,6 +9,7 @@ using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Abstractions.Identity;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Application.Access.Invitations;
+using PedagoraPilot.Application.Access.Members;
 using PedagoraPilot.Application.Access.Assignments;
 using PedagoraPilot.Security.Contracts;
 
@@ -191,26 +192,45 @@ public sealed class AccessController(
         if (!current.UserId.HasValue || current.UserId.Value == Guid.Empty) return Forbid();
         if (userId == current.UserId.Value) return BadRequest(new { error = "cannot_change_own_roles" });
 
-        var requested = body?.Roles?.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
-        if (requested.Length != 1) return BadRequest(new { error = "invalid_product_role" });
-        var canonicalRole = NormalizeRole(requested[0]);
-        if (canonicalRole is null) return BadRequest(new { error = "invalid_product_role" });
+        // Roles are product-owned. AuthGate retains one primary access role for the
+        // membership; secondary pedagogical roles are stored in PedagoraPilot.
+        var requested = body?.Roles?
+            .Select(NormalizeRole).ToArray() ?? [];
+        if (requested.Length == 0 || requested.Any(role => role is null))
+            return BadRequest(new { error = "invalid_product_role" });
+        var desired = requested.Select(role => role!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!OrganizationRoleCompatibilityPolicy.IsAllowed(desired))
+            return Conflict(new { error = OrganizationRoleCompatibilityPolicy.ConflictKey });
 
-        var member = await members.GetByAuthGateUserAsync(current.OrganizationId.Value, userId, true, ct);
+        var organizationId = current.OrganizationId.Value;
+        var member = await members.GetByAuthGateUserAsync(organizationId, userId, true, ct);
         if (member is null) return NotFound(new { error = "member_not_found" });
 
-        var currentRoles = await members.GetRoleCodesAsync(current.OrganizationId.Value, userId, ct);
+        var currentRoles = await members.GetRoleCodesAsync(organizationId, userId, ct);
         var targetIsAdministrator = currentRoles.Contains(PedagoraPilotRoleCodes.OrganizationAdministrator, StringComparer.OrdinalIgnoreCase);
-        var newIsAdministrator = string.Equals(canonicalRole, PedagoraPilotRoleCodes.OrganizationAdministrator, StringComparison.OrdinalIgnoreCase);
-        if ((targetIsAdministrator || newIsAdministrator) && !current.HasPermission(PedagoraPilotPermissionCodes.Access.PrivilegedManage))
+        var newIsAdministrator = desired.Contains(PedagoraPilotRoleCodes.OrganizationAdministrator, StringComparer.OrdinalIgnoreCase);
+        if ((targetIsAdministrator || newIsAdministrator) &&
+            !current.HasPermission(PedagoraPilotPermissionCodes.Access.PrivilegedManage))
             return Forbid();
-        if (targetIsAdministrator && !newIsAdministrator
-            && await members.CountActiveRoleAsync(current.OrganizationId.Value, PedagoraPilotRoleCodes.OrganizationAdministrator, ct) <= 1)
+        if (targetIsAdministrator && !newIsAdministrator &&
+            await members.CountActiveRoleAsync(organizationId, PedagoraPilotRoleCodes.OrganizationAdministrator, ct) <= 1)
             return Conflict(new { error = "last_administrator" });
 
-        await identityAccess.SetRoleAsync(new SetApplicationRoleRequest(current.OrganizationId.Value, userId, canonicalRole), ct);
-        await members.SyncRoleProfilesAsync(member, new[] { canonicalRole }, true, ct);
-        member.RegisterRoleChange(canonicalRole);
+        // Preserve the authenticated primary role whenever it still belongs to the desired
+        // set. Never change AuthGate's primary role solely because the request ordering changed.
+        var snapshot = await GetAuthGateMemberSnapshotAsync(userId, ct);
+        if (snapshot is null) return NotFound(new { error = "membership_not_found" });
+        var previousPrimary = snapshot.Roles.FirstOrDefault();
+        var nextPrimary = desired.FirstOrDefault(role =>
+            string.Equals(role, previousPrimary, StringComparison.OrdinalIgnoreCase)) ?? desired[0];
+
+        if (!string.Equals(previousPrimary, nextPrimary, StringComparison.OrdinalIgnoreCase))
+            await identityAccess.SetRoleAsync(new SetApplicationRoleRequest(organizationId, userId, nextPrimary), ct);
+
+        // No silent truncation: persist all validated pedagogical roles, not just the
+        // generic AuthGate primary role.
+        await members.SyncRoleProfilesAsync(member, desired, true, ct);
+        member.RegisterRoleChange(nextPrimary);
         await unitOfWork.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -236,13 +256,18 @@ public sealed class AccessController(
         var snapshot = await GetAuthGateMemberSnapshotAsync(userId, ct);
         if (snapshot is null) return NotFound(new { error = "membership_not_found" });
 
+        // Resolve the full product role set before changing the AuthGate membership status.
+        // A status change must never collapse Trainer + PedagogicalManager + Jury to one role.
+        if (body.Active && !OrganizationRoleCompatibilityPolicy.IsAllowed(snapshot.Roles))
+            return Conflict(new { error = OrganizationRoleCompatibilityPolicy.ConflictKey });
+
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(new { active = body.Active }));
         var raw = await ForwardRawAsync(HttpMethod.Put, $"/api/pedagora/access/{userId:D}/status", json.RootElement, ct);
         if (!raw.IsSuccessStatusCode)
             return new ContentResult { StatusCode = (int)raw.StatusCode, Content = raw.Content, ContentType = raw.ContentType };
 
         member.SynchronizeIdentity(snapshot.Email, snapshot.FirstName, snapshot.LastName, body.Active);
-        await members.SyncRoleProfilesAsync(member, new[] { snapshot.PrimaryRole }, body.Active, ct);
+        await members.SyncRoleProfilesAsync(member, snapshot.Roles, body.Active, ct);
         member.RegisterStatusChange(body.Active);
         await unitOfWork.SaveChangesAsync(ct);
         return NoContent();
@@ -294,7 +319,7 @@ public sealed class AccessController(
         return NoContent();
     }
 
-    private sealed record AuthGateMemberSnapshot(string Email, string FirstName, string LastName, string PrimaryRole);
+    private sealed record AuthGateMemberSnapshot(string Email, string FirstName, string LastName, IReadOnlyCollection<string> Roles);
 
     private async Task<AuthGateMemberSnapshot?> GetAuthGateMemberSnapshotAsync(Guid userId, CancellationToken ct)
     {
@@ -307,22 +332,30 @@ public sealed class AccessController(
         foreach (var item in items.EnumerateArray())
         {
             if (!item.TryGetProperty("id", out var idNode) || !Guid.TryParse(idNode.GetString(), out var id) || id != userId) continue;
-            var role = item.TryGetProperty("primaryRole", out var primaryRole) ? primaryRole.GetString() : null;
-            if (string.IsNullOrWhiteSpace(role) && item.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array)
+            // Preserve all assigned roles, not merely the primary role. Older AuthGate
+            // instances may return primaryRole only; keep that backward-compatible fallback.
+            var snapshotRoles = new List<string>();
+            if (item.TryGetProperty("roles", out var rolesNode) && rolesNode.ValueKind == JsonValueKind.Array)
             {
-                foreach (var roleNode in roles.EnumerateArray())
+                foreach (var roleNode in rolesNode.EnumerateArray())
                 {
                     if (roleNode.ValueKind != JsonValueKind.String) continue;
-                    role = roleNode.GetString();
-                    if (!string.IsNullOrWhiteSpace(role)) break;
+                    var normalized = NormalizeRole(roleNode.GetString());
+                    if (normalized is not null && !snapshotRoles.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                        snapshotRoles.Add(normalized);
                 }
             }
-            if (string.IsNullOrWhiteSpace(role)) return null;
+            if (snapshotRoles.Count == 0 && item.TryGetProperty("primaryRole", out var primaryRoleNode))
+            {
+                var normalized = NormalizeRole(primaryRoleNode.GetString());
+                if (normalized is not null) snapshotRoles.Add(normalized);
+            }
+            if (snapshotRoles.Count == 0) return null;
             return new AuthGateMemberSnapshot(
                 item.TryGetProperty("email", out var email) ? email.GetString() ?? string.Empty : string.Empty,
                 item.TryGetProperty("firstName", out var firstName) ? firstName.GetString() ?? string.Empty : string.Empty,
                 item.TryGetProperty("lastName", out var lastName) ? lastName.GetString() ?? string.Empty : string.Empty,
-                role);
+                snapshotRoles);
         }
         return null;
     }

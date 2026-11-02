@@ -269,6 +269,11 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.HasIndex("MemberId")
                         .IsUnique();
 
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_organization_direction_one_active_per_organization")
+                        .HasFilter("\"IsActive\" = TRUE");
+
                     b.HasIndex("OrganizationId", "IsActive");
 
                     b.ToTable("organization_direction_profiles", "organization");
@@ -413,6 +418,11 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
 
                     b.HasIndex("MemberId")
                         .IsUnique();
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_site_direction_one_active_per_organization")
+                        .HasFilter("\"IsActive\" = TRUE");
 
                     b.HasIndex("OrganizationId", "IsActive");
 

@@ -6,6 +6,7 @@ using PedagoraPilot.Domain.Identifiers;
 namespace PedagoraPilot.Application.Certification;
 public sealed record GetCertificationSchemesQuery(Guid? ReferentialVersionId) : IRequest<IReadOnlyCollection<CertificationSchemeDto>>;
 public sealed record GetCertificationExamSessionsQuery(CohortId? CohortId) : IRequest<IReadOnlyCollection<CertificationExamSessionDto>>;
+public sealed record GetCertificationJuryAssignmentsQuery(CertificationExamSessionId SessionId) : IRequest<IReadOnlyCollection<JuryAssignmentDto>>;
 public sealed record GetCertificationCandidatesQuery(CertificationExamSessionId SessionId) : IRequest<IReadOnlyCollection<CertificationCandidateDto>>;
 public sealed record CreateCertificationExamSessionCommand(CohortId CohortId, CertificationSchemeId SchemeId, string Title, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, string? Venue) : ICommand<CertificationExamSessionDto>;
 public sealed record PlanCertificationExamSessionCommand(CertificationExamSessionId SessionId) : ICommand<CertificationExamSessionDto>;

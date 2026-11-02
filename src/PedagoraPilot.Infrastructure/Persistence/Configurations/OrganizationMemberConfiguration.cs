@@ -44,8 +44,22 @@ internal static class MemberRoleProfileConfiguration
 }
 
 public sealed class OrganizationAdministratorProfileConfiguration : IEntityTypeConfiguration<OrganizationAdministratorProfile> { public void Configure(EntityTypeBuilder<OrganizationAdministratorProfile> b) => MemberRoleProfileConfiguration.Configure(b, "organization_administrator_profiles"); }
-public sealed class OrganizationDirectionProfileConfiguration : IEntityTypeConfiguration<OrganizationDirectionProfile> { public void Configure(EntityTypeBuilder<OrganizationDirectionProfile> b) => MemberRoleProfileConfiguration.Configure(b, "organization_direction_profiles"); }
-public sealed class SiteDirectionProfileConfiguration : IEntityTypeConfiguration<SiteDirectionProfile> { public void Configure(EntityTypeBuilder<SiteDirectionProfile> b) => MemberRoleProfileConfiguration.Configure(b, "site_direction_profiles"); }
+public sealed class OrganizationDirectionProfileConfiguration : IEntityTypeConfiguration<OrganizationDirectionProfile>
+{
+    public void Configure(EntityTypeBuilder<OrganizationDirectionProfile> b)
+    {
+        MemberRoleProfileConfiguration.Configure(b, "organization_direction_profiles");
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasFilter("\"IsActive\" = TRUE").HasDatabaseName("UX_organization_direction_one_active_per_organization");
+    }
+}
+public sealed class SiteDirectionProfileConfiguration : IEntityTypeConfiguration<SiteDirectionProfile>
+{
+    public void Configure(EntityTypeBuilder<SiteDirectionProfile> b)
+    {
+        MemberRoleProfileConfiguration.Configure(b, "site_direction_profiles");
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasFilter("\"IsActive\" = TRUE").HasDatabaseName("UX_site_direction_one_active_per_organization");
+    }
+}
 public sealed class PedagogicalManagerProfileConfiguration : IEntityTypeConfiguration<PedagogicalManagerProfile> { public void Configure(EntityTypeBuilder<PedagogicalManagerProfile> b) => MemberRoleProfileConfiguration.Configure(b, "pedagogical_manager_profiles"); }
 public sealed class SecretariatProfileConfiguration : IEntityTypeConfiguration<SecretariatProfile> { public void Configure(EntityTypeBuilder<SecretariatProfile> b) => MemberRoleProfileConfiguration.Configure(b, "secretariat_profiles"); }
 public sealed class TrainerProfileConfiguration : IEntityTypeConfiguration<TrainerProfile> { public void Configure(EntityTypeBuilder<TrainerProfile> b) => MemberRoleProfileConfiguration.Configure(b, "trainer_profiles"); }
