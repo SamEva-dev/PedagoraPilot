@@ -23,8 +23,6 @@ public sealed class CreateProgramCommandHandler(
             throw new ConflictApplicationException(ErrorKeys.ProgramCodeAlreadyExists);
 
         var p = TrainingProgram.Create(family.Id, r.Code, r.Name, r.DescriptionKey, r.Icon, r.DurationHours, r.EnabledModules, r.ExternalKey, organizationId);
-        if (Enum.TryParse<ProgramStatus>(r.Status, true, out var s) && s != ProgramStatus.Active)
-            p.Update(family.Id, r.Name, r.DescriptionKey, r.Icon, r.DurationHours, s, r.EnabledModules);
         await programs.AddAsync(p, ct);
 
         // A tenant-created formation must immediately own a usable referential version.
@@ -64,9 +62,7 @@ public sealed class UpdateProgramCommandHandler(
         else
             TenantScope.RequirePlatform(current);
         var family = await families.GetByCodeAsync(r.FamilyCode, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.ProgramFamilyNotFound);
-        if (!Enum.TryParse<ProgramStatus>(r.Status, true, out var status))
-            status = ProgramStatus.Active;
-        p.Update(family.Id, r.Name, r.DescriptionKey, r.Icon, r.DurationHours, status, r.EnabledModules);
+        p.Update(family.Id, r.Name, r.DescriptionKey, r.Icon, r.DurationHours, p.Status, r.EnabledModules);
 
         var referential = await referentials.Query(false).FirstOrDefaultAsync(x => x.ProgramId == p.Id, ct);
         string? displayVersion = null;

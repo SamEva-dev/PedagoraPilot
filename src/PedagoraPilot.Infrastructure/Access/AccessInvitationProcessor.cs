@@ -17,6 +17,7 @@ public sealed class AccessInvitationProcessor(
     IApplicationIdentityAccess identity,
     IOrganizationMemberRepository members,
     IStudentMemberProvisioner studentMembers,
+    IWorkplaceTutorAssignmentRepository tutorAssignments,
     IUnitOfWork unitOfWork,
     PedagoraPilot.Infrastructure.Persistence.PedagoraPilotDbContext db,
     IIdempotentEmailingService emailing,
@@ -31,8 +32,8 @@ public sealed class AccessInvitationProcessor(
         var bypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
         if (bypass)
         {
-            if (environment.IsProduction())
-                throw new InvalidOperationException("AccessInvitations:BypassEmailAcceptance is forbidden in Production.");
+            if (!environment.IsDevelopment())
+                throw new InvalidOperationException("AccessInvitations:BypassEmailAcceptance is permitted only in Development.");
             var password = configuration["AccessInvitations:DevelopmentDefaultPassword"];
             if (string.IsNullOrWhiteSpace(password))
                 throw new InvalidOperationException("AccessInvitations:DevelopmentDefaultPassword is required when bypass is enabled.");
@@ -44,6 +45,10 @@ public sealed class AccessInvitationProcessor(
         if (string.IsNullOrWhiteSpace(acceptBase))
             throw new InvalidOperationException("AccessInvitations:FrontendAcceptUrl is required when email acceptance is enabled.");
 
+        // Production links must not disclose a single-use invitation token over HTTP.
+        if (!Uri.TryCreate(acceptBase, UriKind.Absolute, out var acceptUri) ||
+            (!environment.IsDevelopment() && acceptUri.Scheme != Uri.UriSchemeHttps))
+            throw new InvalidOperationException("ACCESS_INVITATION_HTTPS_URL_REQUIRED");
         var url = $"{acceptBase}/{Uri.EscapeDataString(token)}";
         var displayName = string.Join(' ', new[] { invitation.FirstName, invitation.LastName }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
         if (displayName.Length == 0) displayName = invitation.Email;
@@ -67,6 +72,13 @@ public sealed class AccessInvitationProcessor(
             ?? throw new InvalidOperationException("ACCESS_INVITATION_NOT_FOUND");
         if (!invitation.MatchesToken(token) || !invitation.IsUsable(DateTime.UtcNow))
             throw new InvalidOperationException("ACCESS_INVITATION_INVALID_OR_EXPIRED");
+        // An obsolete tutor invitation must not even offer a password enrollment page.
+        if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.InternshipTutor, StringComparison.OrdinalIgnoreCase))
+        {
+            var linked = await tutorAssignments.GetByInvitationAsync(invitation.OrganizationId, invitation.Id.Value, ct);
+            if (!linked.Any(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Pending))
+                throw new UnauthorizedAccessException("WORKPLACE_TUTOR_INVITATION_REVOKED");
+        }
         var existingActive = await identity.ExistingActiveIdentityAsync(invitation.Email, ct);
         return new AccessInvitationPreparation(invitation.Email, existingActive);
     }
@@ -78,7 +90,16 @@ public sealed class AccessInvitationProcessor(
             ?? throw new InvalidOperationException("ACCESS_INVITATION_NOT_FOUND");
         if (!invitation.MatchesToken(token) || !invitation.IsUsable(DateTime.UtcNow))
             throw new InvalidOperationException("ACCESS_INVITATION_INVALID_OR_EXPIRED");
+        // Prevent an obsolete invitation from provisioning a role after tutor reassignment.
+        if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.InternshipTutor, StringComparison.OrdinalIgnoreCase))
+        {
+            var attached = await tutorAssignments.GetByInvitationAsync(invitation.OrganizationId, invitation.Id.Value, ct);
+            if (attached.Count == 0 || attached.All(x => x.Status != PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Pending))
+                throw new UnauthorizedAccessException("WORKPLACE_TUTOR_INVITATION_REVOKED");
+        }
         var bypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
+        if (bypass && !environment.IsDevelopment())
+            throw new InvalidOperationException("AccessInvitations:BypassEmailAcceptance is permitted only in Development.");
         var existingActive = await identity.ExistingActiveIdentityAsync(invitation.Email, ct);
         if (!bypass && !existingActive && string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("ACCESS_INVITATION_PASSWORD_REQUIRED");
@@ -146,6 +167,15 @@ public sealed class AccessInvitationProcessor(
                 if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
                     await studentMembers.EnsureAsync(invitation.OrganizationId, provisioned.UserId, invitation.Email, invitation.FirstName, invitation.LastName, invitation.CohortId, invitation.Phone, invitation.BirthDate, invitation.EnrolledOn, txCt);
 
+                if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.InternshipTutor, StringComparison.OrdinalIgnoreCase))
+                {
+                    var assignments = await tutorAssignments.GetByInvitationAsync(invitation.OrganizationId, invitation.Id.Value, txCt);
+                    if (assignments.Count == 0) throw new ConflictApplicationException("WORKPLACE_TUTOR_ASSIGNMENT_NOT_FOUND");
+                    var pendingAssignments = assignments.Where(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Pending).ToArray();
+                    if (pendingAssignments.Length == 0) throw new ConflictApplicationException("WORKPLACE_TUTOR_INVITATION_REVOKED");
+                    foreach (var assignment in pendingAssignments)
+                        assignment.Activate(provisioned.UserId, invitation.Email);
+                }
                 invitation.Accept(provisioned.UserId);
                 await unitOfWork.SaveChangesAsync(txCt);
                 return provisioned.UserId;

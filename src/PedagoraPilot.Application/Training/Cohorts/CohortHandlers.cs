@@ -43,15 +43,14 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
         if (program.OrganizationId.HasValue && program.OrganizationId.Value != site.OrganizationId)
             throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
 
-        var validStatus = string.IsNullOrWhiteSpace(request.InitialStatus)
-            || Enum.TryParse<CohortStatus>(request.InitialStatus, true, out _);
-        if (!validStatus)
+        // Legacy callers may still send an initial status; it cannot override the calendar.
+        // Explicit Draft is an administrative state and must remain distinct.
+        if (!string.IsNullOrWhiteSpace(request.InitialStatus)
+            && !Enum.TryParse<CohortStatus>(request.InitialStatus, true, out _))
             throw new ValidationApplicationException(ErrorKeys.CohortStatusInvalid);
-        var status = string.IsNullOrWhiteSpace(request.InitialStatus)
-            ? CohortStatus.Planned
-            : Enum.Parse<CohortStatus>(request.InitialStatus, ignoreCase: true);
-        if (status is not (CohortStatus.Draft or CohortStatus.Planned or CohortStatus.Active))
-            throw new ValidationApplicationException(ErrorKeys.CohortStatusInvalid);
+        var status = string.Equals(request.InitialStatus, "draft", StringComparison.OrdinalIgnoreCase)
+            ? CohortStatus.Draft
+            : CohortTemporalStatus.FromDates(request.StartDate, request.EndDate, CohortTemporalStatus.Today());
 
         var cohort = Cohort.Create(site.OrganizationId, site.Id, offering.Id, referentialVersion.Id, request.Code, request.Name, request.StartDate, request.EndDate, request.Capacity, activeTrainer.AuthGateUserId, activeTrainer.DisplayName, request.ExternalKey, status);
         await cohorts.AddAsync(cohort, ct);
@@ -68,7 +67,7 @@ public sealed class CreateCohortCommandHandler(ICohortRepository cohorts, IProgr
     internal static CohortDto ToDto(Cohort cohort, int learnerCount, IObjectMapper mapper)
     {
         var model = mapper.Map<Cohort, CohortReadModel>(cohort);
-        return new CohortDto(model.Id.Value, model.ExternalKey ?? model.Id.Value.ToString(), model.OrganizationId, model.SiteId, model.ProgramOfferingId, model.ReferentialVersionId, model.Code, model.Name, model.StartDate, model.EndDate, model.Capacity, learnerCount, model.PedagogicalManagerAuthGateUserId, model.PedagogicalManagerDisplayName ?? string.Empty, model.Status.ToString().ToLowerInvariant());
+        return new CohortDto(model.Id.Value, model.ExternalKey ?? model.Id.Value.ToString(), model.OrganizationId, model.SiteId, model.ProgramOfferingId, model.ReferentialVersionId, model.Code, model.Name, model.StartDate, model.EndDate, model.Capacity, learnerCount, model.PedagogicalManagerAuthGateUserId, model.PedagogicalManagerDisplayName ?? string.Empty, CohortTemporalStatus.DisplayStatus(model.Status, model.StartDate, model.EndDate, CohortTemporalStatus.Today()).ToString().ToLowerInvariant());
     }
 }
 
@@ -132,7 +131,10 @@ public sealed class UpdateCohortCommandHandler(ICohortRepository cohorts, IProgr
         if (request.Capacity < occupiedSeats)
             throw new ConflictApplicationException(ErrorKeys.CohortCapacityBelowEnrollmentCount);
         var learnerCount = await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
-        cohort.Update(request.Name, request.StartDate, request.EndDate, request.Capacity, status);
+        var effectiveStatus = status is CohortStatus.Draft or CohortStatus.Cancelled
+            ? status
+            : CohortTemporalStatus.FromDates(request.StartDate, request.EndDate, CohortTemporalStatus.Today());
+        cohort.Update(request.Name, request.StartDate, request.EndDate, request.Capacity, effectiveStatus);
         return CreateCohortCommandHandler.ToDto(cohort, learnerCount, mapper);
     }
 }

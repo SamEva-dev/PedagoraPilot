@@ -3300,6 +3300,57 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.ToTable("periods", "workplace");
                 });
 
+            modelBuilder.Entity("PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AuthGateUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("InvitationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InvitedEmail")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("WorkplacePeriodId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkplacePeriodId");
+
+                    b.HasIndex("OrganizationId", "InvitationId");
+
+                    b.HasIndex("OrganizationId", "WorkplacePeriodId", "AuthGateUserId");
+
+                    b.HasIndex("OrganizationId", "WorkplacePeriodId", "InvitedEmail")
+                        .IsUnique()
+                        .HasFilter("\"Status\" <> 'Revoked'");
+
+                    b.ToTable("tutor_assignments", "workplace");
+                });
+
             modelBuilder.Entity("PedagoraPilot.Infrastructure.Persistence.Catalog.ProgramCapabilityRow", b =>
                 {
                     b.Property<Guid>("ProgramId")
@@ -3561,6 +3612,15 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.HasOne("PedagoraPilot.Domain.Workplace.WorkplacePeriod", null)
                         .WithMany("Evaluations")
                         .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignment", b =>
+                {
+                    b.HasOne("PedagoraPilot.Domain.Workplace.WorkplacePeriod", null)
+                        .WithMany()
+                        .HasForeignKey("WorkplacePeriodId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

@@ -55,6 +55,7 @@ public sealed class PedagoraPilotDbContext : DbContext
     public DbSet<DrivingEvaluation> DrivingEvaluations => Set<DrivingEvaluation>();
     public DbSet<DrivingEvaluationCriterion> DrivingEvaluationCriteria => Set<DrivingEvaluationCriterion>();
     public DbSet<WorkplacePeriod> WorkplacePeriods => Set<WorkplacePeriod>();
+    public DbSet<WorkplaceTutorAssignment> WorkplaceTutorAssignments => Set<WorkplaceTutorAssignment>();
     public DbSet<WorkplaceActivity> WorkplaceActivities => Set<WorkplaceActivity>();
     public DbSet<WorkplaceDocumentChecklistItem> WorkplaceDocumentChecklist => Set<WorkplaceDocumentChecklistItem>();
     public DbSet<WorkplaceEvaluation> WorkplaceEvaluations => Set<WorkplaceEvaluation>();
@@ -180,12 +181,22 @@ public sealed class PedagoraPilotDbContext : DbContext
         foreach (var e in programs)
         {
             var id = e.Entity.Id;
-            ProgramCapabilities.RemoveRange(ProgramCapabilities.Where(x => x.ProgramId == id));
-            if (e.State == EntityState.Deleted) continue;
+            // A status or responsible-trainer edit must not erase modules merely
+            // because EF does not map the aggregate's ignored _capabilities list.
+            if (e.State == EntityState.Modified && !e.Entity.CapabilitiesChanged) continue;
+            var existing = ProgramCapabilities.Where(x => x.ProgramId == id).ToList();
+            if (e.State == EntityState.Deleted)
+            {
+                ProgramCapabilities.RemoveRange(existing);
+                continue;
+            }
 
-            var capabilities = e.Entity.Capabilities.Distinct().ToArray();
-            foreach (var c in capabilities)
-                ProgramCapabilities.Add(new ProgramCapabilityRow { ProgramId = id, CapabilityCode = c });
+            var desired = e.Entity.Capabilities.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var desiredSet = desired.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingSet = existing.Select(x => x.CapabilityCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            ProgramCapabilities.RemoveRange(existing.Where(x => !desiredSet.Contains(x.CapabilityCode)));
+            foreach (var capability in desired.Where(x => !existingSet.Contains(x)))
+                ProgramCapabilities.Add(new ProgramCapabilityRow { ProgramId = id, CapabilityCode = capability });
         }
 
         var referentialVersions = ChangeTracker
@@ -196,6 +207,9 @@ public sealed class PedagoraPilotDbContext : DbContext
         foreach (var e in referentialVersions)
         {
             var id = e.Entity.Id;
+            // Versions have immutable capabilities: archiving/publishing a version
+            // must never rewrite its capability rows from an unloaded collection.
+            if (e.State == EntityState.Modified) continue;
             ReferentialVersionCapabilities.RemoveRange(ReferentialVersionCapabilities.Where(x => x.ReferentialVersionId == id));
             if (e.State == EntityState.Deleted) continue;
 

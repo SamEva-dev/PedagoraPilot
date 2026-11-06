@@ -22,7 +22,7 @@ public sealed class TrainingProgram : AggregateRoot
         ExternalKey = externalKey;
         ResponsibleTrainerAuthGateUserId = responsibleTrainerAuthGateUserId;
         ResponsibleTrainerDisplayName = NormalizeOptional(responsibleTrainerDisplayName);
-        Status = ProgramStatus.Active;
+        Status = ProgramStatus.Draft;
         CreatedAtUtc = UpdatedAtUtc = DateTime.UtcNow;
         Version = 1;
     }
@@ -39,6 +39,18 @@ public sealed class TrainingProgram : AggregateRoot
     public Guid? ResponsibleTrainerAuthGateUserId { get; private set; }
     public string? ResponsibleTrainerDisplayName { get; private set; }
     public IReadOnlyCollection<string> Capabilities => _capabilities.AsReadOnly();
+    // Non-persistent flag: only a deliberate module edit may replace join-table rows.
+    public bool CapabilitiesChanged { get; private set; }
+
+    // Rehydrate the ignored DDD collection from its persisted join table.
+    // This is not a domain mutation and must never trigger a rewrite.
+    public void RestoreCapabilities(IEnumerable<string> values)
+    {
+        _capabilities.Clear();
+        _capabilities.AddRange(values.Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+        CapabilitiesChanged = false;
+    }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public long Version { get; private set; }
@@ -67,10 +79,24 @@ public sealed class TrainingProgram : AggregateRoot
         DescriptionKey = descriptionKey.Trim();
         Icon = icon.Trim();
         DurationHours = durationHours;
-        Status = status;
+        // Editing identity and pedagogy never changes the administrative lifecycle.
         ResponsibleTrainerAuthGateUserId = responsibleTrainerAuthGateUserId;
         ResponsibleTrainerDisplayName = NormalizeOptional(responsibleTrainerDisplayName);
         ReplaceCapabilities(capabilities);
+        UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new TrainingProgramUpdatedDomainEvent(Id));
+    }
+
+    public void ChangeStatus(ProgramStatus target)
+    {
+        if (Status == target) return;
+        if (!Enum.IsDefined(target) || target == ProgramStatus.Draft)
+            throw new DomainException("PROGRAM_STATUS_TRANSITION_INVALID");
+        if (target == ProgramStatus.Active && !ResponsibleTrainerAuthGateUserId.HasValue)
+            throw new DomainException("PROGRAM_ACTIVATION_RESPONSIBLE_REQUIRED");
+        if (target == ProgramStatus.Active && _capabilities.Count == 0)
+            throw new DomainException("PROGRAM_CAPABILITIES_REQUIRED");
+        Status = target;
         UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new TrainingProgramUpdatedDomainEvent(Id));
     }
@@ -101,5 +127,6 @@ public sealed class TrainingProgram : AggregateRoot
         _capabilities.AddRange(values.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
         if (_capabilities.Count == 0)
             throw new DomainException("PROGRAM_CAPABILITIES_REQUIRED");
+        CapabilitiesChanged = true;
     }
 }

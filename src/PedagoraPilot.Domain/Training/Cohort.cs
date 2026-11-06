@@ -25,7 +25,7 @@ public sealed class Cohort : AggregateRoot<CohortId>
         PedagogicalManagerAuthGateUserId = pedagogicalManagerAuthGateUserId;
         PedagogicalManagerDisplayName = NormalizeOptional(pedagogicalManagerDisplayName);
         ExternalKey = NormalizeOptional(externalKey);
-        if (initialStatus is not (CohortStatus.Draft or CohortStatus.Planned or CohortStatus.Active))
+        if (initialStatus is not (CohortStatus.Draft or CohortStatus.Planned or CohortStatus.Active or CohortStatus.Completed))
             throw new DomainException("COHORT_STATUS_INVALID");
         Status = initialStatus;
         CreatedAtUtc = UpdatedAtUtc = DateTime.UtcNow;

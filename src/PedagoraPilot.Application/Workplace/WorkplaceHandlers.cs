@@ -11,6 +11,8 @@ using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Learning;
 using PedagoraPilot.Domain.Workplace;
 using PedagoraPilot.Domain.Training;
+using PedagoraPilot.Domain.Access;
+using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Application.Workplace;
 internal static class WorkplaceDtoFactory
@@ -62,6 +64,8 @@ internal static class WorkplaceDtoFactory
         WorkplacePeriodStatus.Completed => "completed",
         WorkplacePeriodStatus.Incomplete => "incomplete",
         WorkplacePeriodStatus.Cancelled => "cancelled",
+        WorkplacePeriodStatus.Archived => "archived",
+        WorkplacePeriodStatus.Deleted => "deleted",
         _ => "planned"
     };
     public static string ActivityStatus(WorkplaceActivityStatus x) => x == WorkplaceActivityStatus.Done ? "done" : x == WorkplaceActivityStatus.NotApplicable ? "notApplicable" : "pending";
@@ -97,7 +101,7 @@ public sealed class GetWorkplacePeriodsQueryHandler(IWorkplacePeriodRepository p
             if (r.EnrollmentId.HasValue && !selfEnrollmentIds.Contains(r.EnrollmentId.Value))
                 throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
         }
-        IQueryable<WorkplacePeriod> q = periods.Query(false).Include(x => x.Activities).Include(x => x.Documents).Include(x => x.Evaluations).AsSplitQuery();
+        IQueryable<WorkplacePeriod> q = periods.Query(false).Where(x => x.Status != WorkplacePeriodStatus.Deleted).Include(x => x.Activities).Include(x => x.Documents).Include(x => x.Evaluations).AsSplitQuery();
         var organizationId = TenantScope.Organization(current);
         if (organizationId.HasValue)
             q = q.Where(x => x.OrganizationId == organizationId.Value);
@@ -142,7 +146,7 @@ public sealed class GetWorkplacePeriodQueryHandler(IWorkplacePeriodRepository pe
 {
     public async Task<WorkplacePeriodDto> Handle(GetWorkplacePeriodQuery r, CancellationToken ct)
     {
-        var x = await periods.Query(false).Include(a => a.Activities).Include(a => a.Documents).Include(a => a.Evaluations).SingleOrDefaultAsync(a => a.Id == r.Id, ct) ?? throw new NotFoundApplicationException(ErrorKeys.WorkplacePeriodNotFound);
+        var x = await periods.Query(false).Include(a => a.Activities).Include(a => a.Documents).Include(a => a.Evaluations).SingleOrDefaultAsync(a => a.Id == r.Id && a.Status != WorkplacePeriodStatus.Deleted, ct) ?? throw new NotFoundApplicationException(ErrorKeys.WorkplacePeriodNotFound);
         if (TenantScope.Organization(current) is Guid scopeId && x.OrganizationId != scopeId)
             throw new ForbiddenApplicationException(ErrorKeys.WorkplaceForbidden);
         await contextualAccess.EnsureAsync(x, manage: false, ct);
@@ -161,7 +165,10 @@ public sealed class GetWorkplacePeriodTypesQueryHandler(IWorkplaceActivityDefini
         await TenantCatalogAccess.EnsureReferentialVersionAsync(current, r.ReferentialVersionId, versions, referentials, offerings, sites, programs, ct);
         var fromActivities = await activities.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).Select(x => x.PeriodTypeCode).Distinct().ToListAsync(ct);
         var fromDocuments = await documents.Query(false).Where(x => x.ReferentialVersionId == r.ReferentialVersionId && x.Active).Select(x => x.PeriodTypeCode).Distinct().ToListAsync(ct);
-        return fromActivities.Concat(fromDocuments).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray();
+        var configured = fromActivities.Concat(fromDocuments).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray();
+        // Legacy referentials with no workplace definitions may use an empty-checklist
+        // generic placement. Once types are configured, only configured types are allowed.
+        return configured.Length == 0 ? new[] { "STAGE" } : configured;
     }
 }
 
@@ -177,7 +184,7 @@ public sealed class GetWorkplaceRequirementsQueryHandler(IWorkplaceActivityDefin
     }
 }
 
-public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, IWorkplacePeriodRepository periods, IWorkplaceActivityDefinitionRepository activities, IWorkplaceDocumentRequirementRepository documents, IPersonRepository people, ILearnerProfileRepository profiles, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<CreateWorkplacePeriodCommand, WorkplacePeriodDto>
+public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, IWorkplacePeriodRepository periods, IWorkplaceActivityDefinitionRepository activities, IWorkplaceDocumentRequirementRepository documents, IPersonRepository people, ILearnerProfileRepository profiles, IObjectMapper mapper, ICurrentUser current, IAccessInvitationRepository invitations, IOrganizationMemberRepository members, IWorkplaceTutorAssignmentRepository tutorAssignments) : IRequestHandler<CreateWorkplacePeriodCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(CreateWorkplacePeriodCommand r, CancellationToken ct)
     {
@@ -192,9 +199,14 @@ public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository en
         if (TenantScope.Organization(current) is Guid scopeId && e.OrganizationId != scopeId)
             throw new ForbiddenApplicationException(ErrorKeys.WorkplaceForbidden);
         await ContextualScope.EnsureCanManageCohortAsync(current, c, offerings, ct);
+        if (r.StartDate < c.StartDate || r.EndDate > c.EndDate || r.EndDate < r.StartDate)
+            throw new ValidationApplicationException(ErrorKeys.WorkplaceDateRangeInvalid);
         var code = r.PeriodTypeCode.Trim().ToUpperInvariant();
-        if (!await activities.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active, ct)
-            && !await documents.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active, ct))
+        var configuredTypes = await activities.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.Active, ct)
+            || await documents.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.Active, ct);
+        var allowed = await activities.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active, ct)
+            || await documents.Query(false).AnyAsync(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active, ct);
+        if (!allowed && !(code == "STAGE" && !configuredTypes))
             throw new ValidationApplicationException(ErrorKeys.WorkplacePeriodTypeInvalid);
         if (await periods.OverlapsAsync(e.Id, r.StartDate, r.EndDate, null, ct))
             throw new ConflictApplicationException(ErrorKeys.WorkplacePeriodOverlap);
@@ -203,11 +215,51 @@ public sealed class CreateWorkplacePeriodCommandHandler(IEnrollmentRepository en
         var docs = await documents.Query(false).Where(x => x.ReferentialVersionId == c.ReferentialVersionId && x.PeriodTypeCode == code && x.Active).ToListAsync(ct);
         p.InitializeChecklist(defs, docs);
         await periods.AddAsync(p, ct);
+        if (!string.IsNullOrWhiteSpace(r.TutorEmail))
+        {
+            // Invitation and period are committed together by UnitOfWorkBehavior.
+            // No email is sent directly here: the existing domain-event outbox handles delivery.
+            var email = r.TutorEmail.Trim().ToLowerInvariant();
+            if (current.UserId is not { } inviter || inviter == Guid.Empty)
+                throw new ForbiddenApplicationException("AUTH_FORBIDDEN");
+            if (string.Equals(email, current.Email?.Trim(), StringComparison.OrdinalIgnoreCase))
+                throw new ConflictApplicationException("ACCESS_CANNOT_INVITE_SELF");
+            await invitations.AcquireCreationLockAsync(e.OrganizationId, email, ct);
+            // Existing eligible, verified and active organization members are bound
+            // by AuthGateUserId; other identities use verified invitation acceptance.
+            // Arbitrary email input never grants access to an unverified identity.
+            var knownMember = await ExistingTutorMembership.ResolveAsync(members, tutorAssignments, e.OrganizationId, email, ct);
+            if (knownMember is not null)
+            {
+                await tutorAssignments.AddAsync(WorkplaceTutorAssignment.AssignExisting(e.OrganizationId, p.Id.Value,
+                    knownMember.AuthGateUserId, knownMember.Email), ct);
+            }
+            else
+            {
+            var pending = await invitations.ListForOrganizationAsync(e.OrganizationId, false, ct);
+            var existing = pending.FirstOrDefault(x => x.Email == email);
+            if (existing is not null && !string.Equals(existing.RequestedRole, PedagoraPilotRoleCodes.InternshipTutor, StringComparison.OrdinalIgnoreCase))
+                throw new ConflictApplicationException("ACCESS_INVITATION_ALREADY_EXISTS");
+            Guid invitationId;
+            if (existing is not null)
+                invitationId = existing.Id.Value;
+            else
+            {
+                var name = r.TutorName.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                var (invitation, _) = AccessInvitation.Create(e.OrganizationId, email,
+                    name.Length > 0 ? name[0] : "Tuteur", name.Length > 1 ? name[1] : "Stage",
+                    PedagoraPilotRoleCodes.InternshipTutor, inviter, cohortId: c.Id.Value, phone: r.TutorPhone);
+                await invitations.AddAsync(invitation, ct);
+                invitationId = invitation.Id.Value;
+            }
+            await tutorAssignments.AddAsync(WorkplaceTutorAssignment.Invite(e.OrganizationId, p.Id.Value, invitationId, email), ct);
+            }
+        }
         return await WorkplaceDtoFactory.Period(p, people, profiles, enrollments, mapper, ct);
     }
 }
 
-public sealed class UpdateWorkplacePeriodCommandHandler(IWorkplacePeriodRepository periods, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current, WorkplaceContextualAccess contextualAccess) : IRequestHandler<UpdateWorkplacePeriodCommand, WorkplacePeriodDto>
+public sealed class UpdateWorkplacePeriodCommandHandler(IWorkplacePeriodRepository periods, ICohortRepository cohorts, IPersonRepository people, ILearnerProfileRepository profiles, IEnrollmentRepository enrollments, IObjectMapper mapper, ICurrentUser current, WorkplaceContextualAccess contextualAccess, IWorkplaceTutorAssignmentRepository tutorAssignments) : IRequestHandler<UpdateWorkplacePeriodCommand, WorkplacePeriodDto>
 {
     public async Task<WorkplacePeriodDto> Handle(UpdateWorkplacePeriodCommand r, CancellationToken ct)
     {
@@ -215,8 +267,17 @@ public sealed class UpdateWorkplacePeriodCommandHandler(IWorkplacePeriodReposito
         TenantScope.Ensure(current, p.OrganizationId);
         await contextualAccess.EnsureAsync(p, manage: true, ct);
         WorkplaceDtoFactory.EnsureTrainerVisibility(p, current);
+        var cohort = await cohorts.GetByIdAsync(p.CohortId, false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        if (r.StartDate < cohort.StartDate || r.EndDate > cohort.EndDate || r.EndDate < r.StartDate)
+            throw new ValidationApplicationException(ErrorKeys.WorkplaceDateRangeInvalid);
         if (await periods.OverlapsAsync(p.EnrollmentId, r.StartDate, r.EndDate, p.Id, ct))
             throw new ConflictApplicationException(ErrorKeys.WorkplacePeriodOverlap);
+        // A tutor identity is bound to the original invitation. Editing only the email
+        // must never silently transfer access (or leave the previous tutor authorized).
+        if (!string.Equals(p.TutorEmail?.Trim(), r.TutorEmail?.Trim(), StringComparison.OrdinalIgnoreCase)
+            && await tutorAssignments.HasAnyAssignmentAsync(p.OrganizationId, p.Id.Value, ct))
+            throw new ConflictApplicationException("WORKPLACE_TUTOR_REASSIGNMENT_REQUIRED");
         p.UpdateDetails(r.Company, r.City, r.TutorName, r.TutorEmail, r.TutorPhone, r.StartDate, r.EndDate, WorkplaceDtoFactory.Minutes(r.PlannedHours), r.TrainerVisible, r.Notes);
         return await WorkplaceDtoFactory.Period(p, people, profiles, enrollments, mapper, ct);
     }

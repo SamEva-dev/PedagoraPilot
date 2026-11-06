@@ -44,6 +44,7 @@ public sealed class TrainingProgramConfiguration : IEntityTypeConfiguration<Trai
         b.Property(x => x.Version).HasColumnName("version").IsConcurrencyToken();
         b.Ignore(x => x.Capabilities);
         b.Ignore("_capabilities");
+        b.Ignore(x => x.CapabilitiesChanged);
     }
 }
 

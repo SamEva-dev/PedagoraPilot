@@ -26,6 +26,7 @@ public sealed class AccessController(
     IOrganizationMemberRepository members,
     IOrganizationRepository organizations,
     IAccessInvitationRepository invitations,
+    IWorkplaceTutorAssignmentRepository tutorAssignments,
     IUserBusinessAssignmentService businessAssignments,
     IApplicationIdentityAccess identityAccess,
     IUnitOfWork unitOfWork,
@@ -238,6 +239,23 @@ public sealed class AccessController(
     [HttpPost("ownership/transfer"), HasPermission(PedagoraPilotPermissionCodes.Organization.OwnershipTransfer)]
     public Task<IActionResult> TransferOwnership([FromBody] JsonElement body, CancellationToken ct) => ForwardAsync(HttpMethod.Post, "/api/pedagora/access/ownership/transfer", body, ct);
 
+    // Preflight for access removal. Counts only assignments in the caller's organization.
+    [HttpGet("{userId:guid}/removal-impact"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
+    public async Task<IActionResult> RemovalImpact(Guid userId, CancellationToken ct)
+    {
+        if (current.OrganizationId is not Guid organizationId || organizationId == Guid.Empty) return Forbid();
+        var member = await members.GetByAuthGateUserAsync(organizationId, userId, false, ct);
+        if (member is null) return NotFound(new { error = "member_not_found" });
+        var assigned = await tutorAssignments.GetByUserAsync(organizationId, userId, ct);
+        return Ok(new
+        {
+            userId,
+            activeTutorAssignments = assigned.Count(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Active),
+            revokedTutorAssignments = assigned.Count(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Revoked),
+            requiresTutorReassignment = assigned.Any(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Active)
+        });
+    }
+
     public sealed record SetStatusRequest(bool Active);
 
     [HttpPut("{userId:guid}/status"), HasPermission(PedagoraPilotPermissionCodes.Access.Manage)]
@@ -261,6 +279,18 @@ public sealed class AccessController(
         if (body.Active && !OrganizationRoleCompatibilityPolicy.IsAllowed(snapshot.Roles))
             return Conflict(new { error = OrganizationRoleCompatibilityPolicy.ConflictKey });
 
+        // A suspension closes tutor access locally before calling the external identity provider.
+        // Reactivation never silently restores revoked period assignments.
+        if (!body.Active)
+        {
+            var assigned = await tutorAssignments.GetByUserAsync(current.OrganizationId.Value, userId, ct);
+            foreach (var assignment in assigned) assignment.Revoke();
+            member.SynchronizeIdentity(member.Email, member.FirstName, member.LastName, false);
+            await members.SyncRoleProfilesAsync(member, snapshot.Roles, false, ct);
+            member.RegisterStatusChange(false);
+            await unitOfWork.SaveChangesAsync(ct);
+        }
+
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(new { active = body.Active }));
         var raw = await ForwardRawAsync(HttpMethod.Put, $"/api/pedagora/access/{userId:D}/status", json.RootElement, ct);
         if (!raw.IsSuccessStatusCode)
@@ -283,6 +313,18 @@ public sealed class AccessController(
         var member = await members.GetByAuthGateUserAsync(current.OrganizationId.Value, userId, true, ct);
         if (member is null) return NotFound(new { error = "member_not_found" });
 
+        var tutorLinks = await tutorAssignments.GetByUserAsync(current.OrganizationId.Value, userId, ct);
+        if (tutorLinks.Any(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Active))
+            return Conflict(new { error = "ACCESS_ACTIVE_TUTOR_ASSIGNMENTS", activeTutorAssignments = tutorLinks.Count(x => x.Status == PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Active) });
+
+        // Close the local authorization boundary first: AuthGate is a separate database.
+        // If external revocation fails, the account remains blocked locally until retry.
+        foreach (var link in tutorLinks) link.Revoke();
+        member.SynchronizeIdentity(member.Email, member.FirstName, member.LastName, false);
+        await members.SyncRoleProfilesAsync(member, Array.Empty<string>(), false, ct);
+        member.RegisterRevoked();
+        await unitOfWork.SaveChangesAsync(ct);
+
         var raw = await ForwardRawAsync(HttpMethod.Delete, $"/api/pedagora/access/{userId:D}", null, ct);
         if (!raw.IsSuccessStatusCode)
             return new ContentResult { StatusCode = (int)raw.StatusCode, Content = raw.Content, ContentType = raw.ContentType };
@@ -290,10 +332,6 @@ public sealed class AccessController(
         // Revoke immediately in the product projection. AuthGate's SyncPedagoraMember outbox is
         // retained as a reconciliation mechanism, but the UI and business directories no longer
         // wait for that asynchronous message to become consistent.
-        member.SynchronizeIdentity(member.Email, member.FirstName, member.LastName, false);
-        await members.SyncRoleProfilesAsync(member, Array.Empty<string>(), false, ct);
-        member.RegisterRevoked();
-        await unitOfWork.SaveChangesAsync(ct);
         return NoContent();
     }
 

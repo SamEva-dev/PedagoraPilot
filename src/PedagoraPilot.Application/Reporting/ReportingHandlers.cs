@@ -184,6 +184,10 @@ public sealed class GetLearnerDetailHandler(
         if (result is not null)
         {
             await ReportingScope.EnsureCohortAsync(result.CohortId, cohorts, offerings, current, ct);
+            // Respect the same trainer visibility rule as /workplace/periods.
+            // Learners always retain access to their own stage data.
+            if (PedagoraPilot.Application.Workplace.WorkplaceDtoFactory.IsTrainer(current))
+                return result with { Workplace = result.Workplace.Where(stage => stage.TrainerVisible).ToArray() };
             return result;
         }
 

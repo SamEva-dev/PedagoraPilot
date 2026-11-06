@@ -16,11 +16,11 @@ public sealed class CohortSprintS03Tests
     [InlineData(CohortStatus.Planned)]
     [InlineData(CohortStatus.Draft)]
     [InlineData(CohortStatus.Active)]
+    [InlineData(CohortStatus.Completed)]
     public void Create_persists_authorized_initial_status_in_same_aggregate(CohortStatus status)
         => Create(status).Status.Should().Be(status);
 
     [Theory]
-    [InlineData(CohortStatus.Completed)]
     [InlineData(CohortStatus.Cancelled)]
     public void Create_rejects_closed_initial_status(CohortStatus status)
     {

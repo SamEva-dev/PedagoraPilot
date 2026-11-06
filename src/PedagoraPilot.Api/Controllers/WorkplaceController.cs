@@ -28,6 +28,12 @@ public sealed class WorkplaceController(IMediator mediator) : ControllerBase
 
     [HttpPut("periods/{id:guid}"), HasPermission(PedagoraPilotPermissionCodes.Internships.Manage)]
     public Task<WorkplacePeriodDto> Update(Guid id, UpdateWorkplacePeriodRequest r, CancellationToken ct) => mediator.Send(new UpdateWorkplacePeriodCommand(new WorkplacePeriodId(id), r.Company, r.City, r.TutorName, r.TutorEmail, r.TutorPhone, r.StartDate, r.EndDate, r.PlannedHours, r.TrainerVisible, r.Notes), ct);
+    [HttpPost("periods/{id:guid}/tutor/reassign"), HasPermission(PedagoraPilotPermissionCodes.Internships.Manage)]
+    public Task<bool> ReassignTutor(Guid id, ReassignWorkplaceTutorRequest request, CancellationToken ct) =>
+        mediator.Send(new ReassignWorkplaceTutorCommand(id, request.TutorName, request.TutorEmail, request.TutorPhone), ct);
+    [HttpPost("periods/{id:guid}/lifecycle"), HasPermission(PedagoraPilotPermissionCodes.Internships.Manage)]
+    public Task<bool> ChangeLifecycle(Guid id, ChangeWorkplaceLifecycleRequest request, CancellationToken ct) =>
+        mediator.Send(new ChangeWorkplaceLifecycleCommand(id, request.Action, request.Reason), ct);
     [HttpPut("periods/{id:guid}/hours"), HasPermission(PedagoraPilotPermissionCodes.Internships.Manage)]
     public Task<WorkplacePeriodDto> Hours(Guid id, UpdateWorkplaceHoursRequest r, CancellationToken ct) => mediator.Send(new UpdateWorkplaceHoursCommand(new WorkplacePeriodId(id), r.CompletedHours, r.TutorObservation), ct);
     [HttpPut("periods/{id:guid}/activities/{activityId:guid}"), HasPermission(PedagoraPilotPermissionCodes.Internships.Manage)]

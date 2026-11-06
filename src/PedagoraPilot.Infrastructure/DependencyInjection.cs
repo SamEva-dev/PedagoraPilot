@@ -175,6 +175,7 @@ public static class DependencyInjection
         services.AddScoped<ILearnerTopicProgressRepository, LearnerTopicProgressRepository>();
         services.AddScoped<IDrivingEvaluationRepository, DrivingEvaluationRepository>();
         services.AddScoped<IWorkplacePeriodRepository, WorkplacePeriodRepository>();
+        services.AddScoped<IWorkplaceTutorAssignmentRepository, WorkplaceTutorAssignmentRepository>();
         services.AddScoped<IWorkplaceActivityDefinitionRepository, WorkplaceActivityDefinitionRepository>();
         services.AddScoped<IWorkplaceDocumentRequirementRepository, WorkplaceDocumentRequirementRepository>();
         services.AddScoped<IDocumentRepository, DocumentRepository>();

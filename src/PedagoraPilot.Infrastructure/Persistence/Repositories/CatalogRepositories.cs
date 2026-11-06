@@ -11,12 +11,30 @@ public sealed class ProgramFamilyRepository(PedagoraPilotDbContext db) : Reposit
 
 public sealed class TrainingProgramRepository(PedagoraPilotDbContext db) : Repository<TrainingProgram>(db), ITrainingProgramRepository
 {
-    public Task<TrainingProgram?> GetByCodeAsync(string code, Guid? organizationId = null, bool isTracking = false, CancellationToken ct = default)
+    public override async Task<TrainingProgram?> GetByIdAsync(Guid id, bool isTracking = false, CancellationToken cancellationToken = default)
+    {
+        var program = await base.GetByIdAsync(id, isTracking, cancellationToken);
+        if (program is not null)
+            await HydrateAsync(program, cancellationToken);
+        return program;
+    }
+
+    private async Task HydrateAsync(TrainingProgram program, CancellationToken ct)
+    {
+        var codes = await DbContext.ProgramCapabilities.AsNoTracking()
+            .Where(x => x.ProgramId == program.Id)
+            .Select(x => x.CapabilityCode).ToArrayAsync(ct);
+        program.RestoreCapabilities(codes);
+    }
+
+    public async Task<TrainingProgram?> GetByCodeAsync(string code, Guid? organizationId = null, bool isTracking = false, CancellationToken ct = default)
     {
         var normalizedCode = ProgramCode.Create(code);
-        return Query(isTracking).SingleOrDefaultAsync(
-            x => x.OrganizationId == organizationId && x.Code == normalizedCode,
-            ct);
+        var program = await Query(isTracking).SingleOrDefaultAsync(
+            x => x.OrganizationId == organizationId && x.Code == normalizedCode, ct);
+        if (program is not null)
+            await HydrateAsync(program, ct);
+        return program;
     }
 
     public Task<bool> CodeExistsAsync(Guid? organizationId, string code, Guid? exceptId = null, CancellationToken ct = default)

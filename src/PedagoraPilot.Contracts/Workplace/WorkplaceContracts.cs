@@ -10,3 +10,7 @@ public sealed record UpdateWorkplaceActivityRequest(string Status, string? Comme
 public sealed record UpdateWorkplaceDocumentRequest(string Status, Guid? DocumentId);
 public sealed record RecordWorkplaceEvaluationRequest(string Kind, string EvaluatorDisplayName, DateTimeOffset? EvaluatedAtUtc, string Summary, string? Strengths, string? ImprovementAreas, bool? Validated);
 public sealed record WorkplaceRequirementDto(Guid Id, string Code, string Title, string? LabelKey, bool Mandatory, int SortOrder, string Kind);
+
+public sealed record ReassignWorkplaceTutorRequest(string TutorName, string TutorEmail, string? TutorPhone);
+
+public sealed record ChangeWorkplaceLifecycleRequest(string Action, string? Reason);

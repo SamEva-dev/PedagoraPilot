@@ -121,7 +121,7 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
         var present = attendanceRows.Sum(x => x.PresentMinutes);
 
         var workplaceCompleted = await db.WorkplacePeriods.AsNoTracking()
-            .CountAsync(x => enrollmentIds.Contains(x.EnrollmentId) && x.Status == WorkplacePeriodStatus.Completed, ct);
+            .CountAsync(x => enrollmentIds.Contains(x.EnrollmentId) && (x.Status == WorkplacePeriodStatus.Completed || x.Status == WorkplacePeriodStatus.Archived), ct);
 
         var candidates = await db.CertificationCandidates.AsNoTracking()
             .Where(x => enrollmentIds.Contains(x.EnrollmentId))
@@ -587,7 +587,8 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
                 x.PlannedMinutes,
                 x.CompletedMinutes,
                 x.Status,
-                x.TutorObservation
+                x.TutorObservation,
+                x.TrainerVisible
             })
             .ToListAsync(ct);
         var workplaceIds = workplaceRows.Select(x => x.Id).ToArray();
@@ -631,7 +632,7 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
             activitiesByPeriod[x.Id].Select(a => new LearnerWorkplaceActivityDetailDto(a.Code ?? string.Empty, a.Title ?? string.Empty, NormalizeWorkplaceActivityStatus(a.Status))).ToArray(),
             evaluationsByPeriod[x.Id].OrderByDescending(e => e.EvaluatedAtUtc).Select(e => new LearnerWorkplaceEvaluationDetailDto(
                 e.Kind.ToString().ToLowerInvariant(), e.EvaluatorDisplayName ?? string.Empty, e.EvaluatedAtUtc,
-                e.Summary ?? string.Empty, e.Strengths ?? string.Empty, e.ImprovementAreas ?? string.Empty, e.Validated)).ToArray())).ToArray();
+                e.Summary ?? string.Empty, e.Strengths ?? string.Empty, e.ImprovementAreas ?? string.Empty, e.Validated)).ToArray(), x.TrainerVisible)).ToArray();
 
         var documentRows = await db.Documents.AsNoTracking()
             .Where(x => x.OrganizationId == header.OrganizationId && x.Status == DocumentStatus.Active && x.OwnerType == DocumentOwnerType.Enrollment && x.OwnerId == header.EnrollmentId.Value)
@@ -1030,6 +1031,8 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
         WorkplacePeriodStatus.Completed => "completed",
         WorkplacePeriodStatus.Incomplete => "incomplete",
         WorkplacePeriodStatus.Cancelled => "cancelled",
+        WorkplacePeriodStatus.Archived => "archived",
+        WorkplacePeriodStatus.Deleted => "deleted",
         _ => "planned"
     };
 

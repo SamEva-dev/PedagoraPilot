@@ -164,23 +164,62 @@ public sealed class WorkplacePeriod : AggregateRoot<WorkplacePeriodId>
         RaiseDomainEvent(new WorkplacePeriodUpdatedDomainEvent(Id, OrganizationId));
     }
 
-    public void Cancel()
+    // Lifecycle decisions remain attached to the record (no cascading deletion of evidence).
+    // Existing Notes column stores a UTC audit note until a dedicated audit table is introduced.
+    public void Cancel(string reason, Guid actorId)
     {
-        if (Status == WorkplacePeriodStatus.Completed)
-            throw new DomainException("WORKPLACE_COMPLETED_LOCKED");
+        if (Status is WorkplacePeriodStatus.Completed or WorkplacePeriodStatus.Archived or WorkplacePeriodStatus.Deleted)
+            throw new DomainException("WORKPLACE_LIFECYCLE_INVALID");
+        if (Status == WorkplacePeriodStatus.Cancelled) return;
+        AppendLifecycleNote("cancelled", reason, actorId);
         Status = WorkplacePeriodStatus.Cancelled;
-        UpdatedAtUtc = DateTime.UtcNow;
         RaiseDomainEvent(new WorkplacePeriodUpdatedDomainEvent(Id, OrganizationId));
+    }
+
+    public void Archive(Guid actorId)
+    {
+        if (Status == WorkplacePeriodStatus.Archived) return;
+        if (Status != WorkplacePeriodStatus.Completed)
+            throw new DomainException("WORKPLACE_LIFECYCLE_INVALID");
+        AppendLifecycleNote("archived", "Completed placement archived", actorId);
+        Status = WorkplacePeriodStatus.Archived;
+        RaiseDomainEvent(new WorkplacePeriodUpdatedDomainEvent(Id, OrganizationId));
+    }
+
+    // Soft deletion is limited to a planned period without evidence, even if
+    // a checklist was initialized with pending items.
+    public void DeleteUnused(string reason, Guid actorId)
+    {
+        if (Status == WorkplacePeriodStatus.Deleted) return;
+        if (Status != WorkplacePeriodStatus.Planned || CompletedMinutes != 0 || _evaluations.Count != 0
+            || _activities.Any(x => x.Status != WorkplaceActivityStatus.Pending || !string.IsNullOrWhiteSpace(x.Comment))
+            || _documents.Any(x => x.Status != WorkplaceDocumentStatus.Missing || x.DocumentId.HasValue)
+            || !string.IsNullOrWhiteSpace(TutorObservation) || AgreementReceived)
+            throw new DomainException("WORKPLACE_DELETE_HAS_EVIDENCE");
+        AppendLifecycleNote("deleted", reason, actorId);
+        Status = WorkplacePeriodStatus.Deleted;
+        RaiseDomainEvent(new WorkplacePeriodUpdatedDomainEvent(Id, OrganizationId));
+    }
+
+    private void AppendLifecycleNote(string operation, string reason, Guid actorId)
+    {
+        if (actorId == Guid.Empty || string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 500)
+            throw new DomainException("WORKPLACE_LIFECYCLE_REASON_INVALID");
+        var stamp = $"[{DateTime.UtcNow:O}] {operation} by {actorId:D}: {reason.Trim()}";
+        if ((Notes?.Length ?? 0) + stamp.Length + 2 > 4000)
+            throw new DomainException("WORKPLACE_LIFECYCLE_NOTES_FULL");
+        Notes = string.IsNullOrWhiteSpace(Notes) ? stamp : Notes + "\n" + stamp;
+        UpdatedAtUtc = DateTime.UtcNow;
     }
 
     private void EnsureMutable()
     {
-        if (Status is WorkplacePeriodStatus.Completed or WorkplacePeriodStatus.Cancelled)
+        if (Status is WorkplacePeriodStatus.Completed or WorkplacePeriodStatus.Cancelled or WorkplacePeriodStatus.Archived or WorkplacePeriodStatus.Deleted)
             throw new DomainException("WORKPLACE_PERIOD_LOCKED");
     }
     private void EnsureFollowupMutable()
     {
-        if (Status == WorkplacePeriodStatus.Cancelled)
+        if (Status is WorkplacePeriodStatus.Cancelled or WorkplacePeriodStatus.Archived or WorkplacePeriodStatus.Deleted)
             throw new DomainException("WORKPLACE_PERIOD_LOCKED");
     }
 

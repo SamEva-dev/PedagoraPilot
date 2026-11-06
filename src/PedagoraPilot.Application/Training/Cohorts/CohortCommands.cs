@@ -18,7 +18,7 @@ public sealed class CreateCohortCommandValidator : AbstractValidator<CreateCohor
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.Capacity).InclusiveBetween(1, 500);
         RuleFor(x => x.PedagogicalManagerAuthGateUserId).NotNull().NotEqual(Guid.Empty).WithMessage("COHORT_PEDAGOGICAL_MANAGER_REQUIRED");
-        RuleFor(x => x.InitialStatus).Must(status => string.IsNullOrWhiteSpace(status) || status.Equals("planned", StringComparison.OrdinalIgnoreCase) || status.Equals("active", StringComparison.OrdinalIgnoreCase) || status.Equals("draft", StringComparison.OrdinalIgnoreCase))
+        RuleFor(x => x.InitialStatus).Must(status => string.IsNullOrWhiteSpace(status) || status.Equals("planned", StringComparison.OrdinalIgnoreCase) || status.Equals("active", StringComparison.OrdinalIgnoreCase) || status.Equals("draft", StringComparison.OrdinalIgnoreCase) || status.Equals("completed", StringComparison.OrdinalIgnoreCase))
             .WithMessage("COHORT_STATUS_INVALID");
         RuleFor(x => x).Must(x => x.EndDate >= x.StartDate).WithMessage("COHORT_DATE_RANGE_INVALID");
     }

@@ -5,7 +5,9 @@ public enum WorkplacePeriodStatus
     InProgress = 1,
     Completed = 2,
     Incomplete = 3,
-    Cancelled = 4
+    Cancelled = 4,
+    Archived = 5,
+    Deleted = 6
 }
 
 public enum WorkplaceActivityStatus

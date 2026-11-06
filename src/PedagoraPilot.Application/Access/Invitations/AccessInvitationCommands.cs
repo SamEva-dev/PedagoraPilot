@@ -134,7 +134,7 @@ public sealed class CreateAccessInvitationCommandHandler(
 }
 
 public sealed record CancelAccessInvitationCommand(Guid InvitationId) : ICommand<bool>;
-public sealed class CancelAccessInvitationCommandHandler(ICurrentUser current, IAccessInvitationRepository invitations)
+public sealed class CancelAccessInvitationCommandHandler(ICurrentUser current, IAccessInvitationRepository invitations, IWorkplaceTutorAssignmentRepository tutorAssignments)
     : IRequestHandler<CancelAccessInvitationCommand, bool>
 {
     public async Task<bool> Handle(CancelAccessInvitationCommand request, CancellationToken ct)
@@ -147,6 +147,8 @@ public sealed class CancelAccessInvitationCommandHandler(ICurrentUser current, I
         // membership history and must be revoked through the membership workflow.
         if (invitation.Status != AccessInvitationStatus.Pending)
             throw new ConflictApplicationException("ACCESS_INVITATION_NOT_PENDING");
+        var assignments = await tutorAssignments.GetByInvitationAsync(organizationId, invitation.Id.Value, ct);
+        foreach (var assignment in assignments) assignment.Revoke();
         invitations.Remove(invitation);
         return true;
     }
