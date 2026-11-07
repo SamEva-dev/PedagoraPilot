@@ -118,7 +118,8 @@ public sealed class GetLearnerDirectoryQueryHandler(
             .Where(x => peopleById.ContainsKey(x.PersonId))
             .Where(profile => !profile.AuthGateUserId.HasValue
                 ? latestEnrollmentByLearner.ContainsKey(profile.Id)
-                : activeStudentAuthGateIds.Contains(profile.AuthGateUserId.Value))
+                : latestEnrollmentByLearner.ContainsKey(profile.Id)
+                  || activeStudentAuthGateIds.Contains(profile.AuthGateUserId.Value))
             .Select(profile =>
             {
                 var person = peopleById[profile.PersonId];

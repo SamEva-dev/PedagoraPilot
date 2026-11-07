@@ -1,3 +1,4 @@
+using DomainRelay.Exceptions;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Common.Errors;
@@ -20,6 +21,39 @@ public sealed class ExceptionHandlingMiddleware
         try
         {
             await _next(context);
+        }
+        // DomainRelay can wrap handler and pipeline exceptions. Translate only known
+        // application errors, never the wrapper message or arbitrary nested exceptions.
+        catch (DomainRelayException exception)
+        {
+            var underlying = UnwrapDomainRelay(exception);
+            switch (underlying)
+            {
+                case ApplicationExceptionBase application:
+                    _logger.LogWarning("Request rejected by application rule {ErrorKey}. TraceId={TraceId}",
+                        application.ErrorKey, context.TraceIdentifier);
+                    await WriteAsync(context, application.StatusCode, application.ErrorKey, application.Parameters);
+                    break;
+                case ValidationException validation:
+                    var errors = validation.Errors.GroupBy(failure => failure.PropertyName)
+                        .ToDictionary(group => group.Key,
+                            group => group.Select(failure => string.IsNullOrWhiteSpace(failure.ErrorCode)
+                                ? ErrorKeys.ValidationFailed : failure.ErrorCode)
+                                .Distinct(StringComparer.Ordinal).ToArray());
+                    await WriteAsync(context, StatusCodes.Status400BadRequest, ErrorKeys.ValidationFailed, errors: errors);
+                    break;
+                case DomainException domain:
+                    await WriteAsync(context, StatusCodes.Status400BadRequest, domain.ErrorKey);
+                    break;
+                case DbUpdateConcurrencyException:
+                    _logger.LogWarning(exception, "Wrapped optimistic concurrency conflict.");
+                    await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.ConcurrencyConflict);
+                    break;
+                default:
+                    _logger.LogError(exception, "Unhandled DomainRelay request exception. TraceId={TraceId}", context.TraceIdentifier);
+                    await WriteAsync(context, StatusCodes.Status500InternalServerError, ErrorKeys.Unexpected);
+                    break;
+            }
         }
         catch (ValidationException exception)
         {
@@ -96,6 +130,16 @@ public sealed class ExceptionHandlingMiddleware
             _logger.LogError(exception, "Unhandled request exception. TraceId={TraceId}", context.TraceIdentifier);
             await WriteAsync(context, StatusCodes.Status500InternalServerError, ErrorKeys.Unexpected);
         }
+    }
+
+    private static Exception UnwrapDomainRelay(DomainRelayException exception)
+    {
+        Exception current = exception;
+        // Only unwrap the known mediator wrapper. Never map unrelated exceptions
+        // by guessing from their message or their deepest inner exception.
+        for (var depth = 0; depth < 16 && current is DomainRelayException relay && relay.InnerException is not null; depth++)
+            current = relay.InnerException;
+        return current;
     }
 
     private static async Task WriteAsync(HttpContext context, int statusCode, string code, IReadOnlyDictionary<string, object?>? parameters = null, IReadOnlyDictionary<string, string[]>? errors = null)
