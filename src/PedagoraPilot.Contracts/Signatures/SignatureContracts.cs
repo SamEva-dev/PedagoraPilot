@@ -15,3 +15,13 @@ public sealed record SignatureAcknowledgementRequest(bool Acknowledge, string? C
 /// <summary>Only own recorded observations, with live enrollment references; never mock trainees.</summary>
 public sealed record DailyObservationSignatureCandidateDto(Guid SourceId, Guid EnrollmentId, string LearnerName,
     string Subject, DateTimeOffset EvaluatedAtUtc, string SignatureStatus);
+
+/// <summary>Live per-attendee hour reconciliation for the current saved attendance revision.
+/// Signed confirmation of a previous revision never confirms changed hours.</summary>
+public sealed record AttendanceHoursRowDto(Guid EnrollmentId, int RealizedMinutes, int ConfirmedMinutes,
+    int AwaitingMinutes, string ConfirmationStatus);
+public sealed record AttendanceHoursSummaryDto(Guid SessionId, long SheetVersion, int RealizedMinutes,
+    int ConfirmedMinutes, int AwaitingMinutes, IReadOnlyCollection<AttendanceHoursRowDto> Rows);
+
+/// <summary>Own attendance totals for the current organization. Pedagogical progress is separate.</summary>
+public sealed record LearnerAttendanceHoursDto(int RealizedMinutes, int ConfirmedMinutes, int AwaitingMinutes);

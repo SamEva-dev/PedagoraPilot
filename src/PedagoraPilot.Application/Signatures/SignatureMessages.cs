@@ -36,3 +36,8 @@ public sealed record GetAttendanceSignatureContentQuery(SignatureEnvelopeId Id) 
 public sealed record ListMyAttendanceSignaturesQuery() : IQuery<IReadOnlyCollection<SignatureEnvelopeDto>>;
 public sealed record ListSessionAttendanceSignaturesQuery(TrainingSessionId SessionId)
     : IQuery<IReadOnlyCollection<SignatureEnvelopeDto>>;
+
+public sealed record GetSessionAttendanceHoursQuery(TrainingSessionId SessionId, bool OwnOnly = false)
+    : IQuery<AttendanceHoursSummaryDto>;
+
+public sealed record GetMyLearnerAttendanceHoursQuery() : IQuery<LearnerAttendanceHoursDto>;
