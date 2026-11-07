@@ -438,8 +438,23 @@ public sealed class AccessController(
         if (!string.IsNullOrWhiteSpace(authorization)) request.Headers.TryAddWithoutValidation("Authorization", authorization);
         if (body.HasValue) request.Content = new StringContent(body.Value.GetRawText(), Encoding.UTF8, "application/json");
         var client = httpClientFactory.CreateClient("AuthGateAccess");
-        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        var content = response.Content is null ? string.Empty : await response.Content.ReadAsStringAsync(ct);
-        return (response.StatusCode, response.IsSuccessStatusCode, content, response.Content?.Headers.ContentType?.ToString() ?? "application/json");
+        try
+        {
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            var content = response.Content is null ? string.Empty : await response.Content.ReadAsStringAsync(ct);
+            return (response.StatusCode, response.IsSuccessStatusCode, content,
+                response.Content?.Headers.ContentType?.ToString() ?? "application/json");
+        }
+        catch (HttpRequestException)
+        {
+            // Do not expose upstream addresses, bearer credentials or exception details.
+            return (System.Net.HttpStatusCode.ServiceUnavailable, false,
+                "{\"code\":\"AUTHGATE_UPSTREAM_UNAVAILABLE\"}", "application/json");
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (System.Net.HttpStatusCode.ServiceUnavailable, false,
+                "{\"code\":\"AUTHGATE_UPSTREAM_UNAVAILABLE\"}", "application/json");
+        }
     }
 }

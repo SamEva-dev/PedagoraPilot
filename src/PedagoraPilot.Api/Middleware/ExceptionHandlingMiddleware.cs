@@ -45,6 +45,10 @@ public sealed class ExceptionHandlingMiddleware
                 case DomainException domain:
                     await WriteAsync(context, StatusCodes.Status400BadRequest, domain.ErrorKey);
                     break;
+                case DbUpdateException database when IsTrainingSiteUniqueConflict(database):
+                    _logger.LogWarning("Training site code or external key already exists. TraceId={TraceId}", context.TraceIdentifier);
+                    await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.SiteCodeAlreadyExists);
+                    break;
                 case DbUpdateConcurrencyException:
                     _logger.LogWarning(exception, "Wrapped optimistic concurrency conflict.");
                     await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.ConcurrencyConflict);
@@ -72,6 +76,11 @@ public sealed class ExceptionHandlingMiddleware
         {
             _logger.LogWarning(exception, "Optimistic concurrency conflict.");
             await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.ConcurrencyConflict);
+        }
+        catch (DbUpdateException exception) when (IsTrainingSiteUniqueConflict(exception))
+        {
+            _logger.LogWarning("Training site code or external key already exists. TraceId={TraceId}", context.TraceIdentifier);
+            await WriteAsync(context, StatusCodes.Status409Conflict, ErrorKeys.SiteCodeAlreadyExists);
         }
         // The first attendance write may race against another transaction which
         // inserts the same session sheet. Preserve the database's unique index as
@@ -131,6 +140,12 @@ public sealed class ExceptionHandlingMiddleware
             await WriteAsync(context, StatusCodes.Status500InternalServerError, ErrorKeys.Unexpected);
         }
     }
+
+    private static bool IsTrainingSiteUniqueConflict(DbUpdateException exception)
+        => exception.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && (string.Equals(pg.TableName, "training_sites", StringComparison.OrdinalIgnoreCase)
+                || (pg.ConstraintName?.Contains("training_sites", StringComparison.OrdinalIgnoreCase) ?? false));
 
     private static Exception UnwrapDomainRelay(DomainRelayException exception)
     {
