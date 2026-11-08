@@ -38,9 +38,9 @@ public sealed class AccessInvitationProcessor(
             var password = stagingQa
                 ? configuration["QA:InvitationInitialPassword"]
                 : configuration["AccessInvitations:DevelopmentDefaultPassword"];
-            if (string.IsNullOrWhiteSpace(password) || (stagingQa && password.Length < 12))
+            if (string.IsNullOrWhiteSpace(password) || (stagingQa && password.Length < 8))
                 throw new InvalidOperationException(stagingQa
-                    ? "QA:InvitationInitialPassword must be configured with at least 12 characters in staging."
+                    ? "QA:InvitationInitialPassword must be configured with at least 8 characters in staging."
                     : "AccessInvitations:DevelopmentDefaultPassword is required when bypass is enabled.");
             await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct);
             return;
