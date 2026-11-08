@@ -45,6 +45,10 @@ try
     {
         client.Timeout = TimeSpan.FromSeconds(5);
     }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    builder.Services.AddHttpClient("AuthGateMembershipState", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(20);
+    }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
     builder.Services.AddHttpClient("AuthGateAccess", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(30);
@@ -122,6 +126,8 @@ try
     app.UseCors("Frontend");
     app.UseAuthentication();
     app.UseMiddleware<OidcBusinessContextMiddleware>();
+    // Revocations must take effect even when an already-issued JWT is still valid.
+    app.UseMiddleware<ActiveWorkspaceAuthorizationMiddleware>();
     app.UseMiddleware<TenantIdentityMiddleware>();
     app.UseAuthorization();
     app.UseMiddleware<IdempotencyMiddleware>();

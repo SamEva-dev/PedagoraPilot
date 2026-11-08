@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Infrastructure.Persistence;
+using PedagoraPilot.Domain.Organizations;
 
 namespace PedagoraPilot.Api.Controllers;
 
@@ -28,6 +29,13 @@ public sealed class WorkspaceContextNamesController(
         // memberships; this read-only list is never used for authorization.
         var organizations = await db.Organizations
             .AsNoTracking()
+            // Keep parity with the server-side workspace bootstrap policy.
+            // A suspended or closed organization cannot be selected even by its owner.
+            .Where(org => org.Status == OrganizationStatus.Draft ||
+                          org.Status == OrganizationStatus.Active ||
+                          org.Status == OrganizationStatus.Restricted)
+            // Ownership originates in explicit organization provisioning (Register).
+            // An invitation grants only an active membership, never ownership.
             .Where(org => org.OwnerUserId == userId || db.OrganizationMembers.Any(member =>
                 member.OrganizationId == org.Id &&
                 member.AuthGateUserId == userId && member.IsActive))
@@ -39,6 +47,7 @@ public sealed class WorkspaceContextNamesController(
             })
             .ToListAsync(cancellationToken);
 
+        Response.Headers.CacheControl = "no-store";
         return Ok(new { organizations });
     }
 }
