@@ -35,6 +35,16 @@ public sealed class SignatureDeliveryProcessor(ISignatureEnvelopeRepository enve
             throw new InvalidOperationException("SIGNATURE_SIGNER_CHANGED");
         var person = await persons.GetByIdAsync(profile.PersonId, false, ct)
             ?? throw new InvalidOperationException("SIGNATURE_PERSON_NOT_FOUND");
+        // In staging QA mode the authenticated student responds from the in-app
+        // attendance inbox. Preserve the pending envelope and all access checks,
+        // but do not require SMTP or a public e-mail action link.
+        if (config.GetValue<bool>("QA:BypassEmailDelivery"))
+        {
+            if (!environment.IsStaging() || !config.GetValue<bool>("QA:Enabled"))
+                throw new InvalidOperationException("QA:BypassEmailDelivery requires QA:Enabled in Staging.");
+            return;
+        }
+
         var baseUrl = config["Signatures:FrontendBaseUrl"]?.TrimEnd('/');
         if (string.IsNullOrWhiteSpace(baseUrl) || !Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttps && (environment.IsProduction() || !uri.IsLoopback)))

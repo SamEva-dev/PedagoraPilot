@@ -29,14 +29,19 @@ public sealed class AccessInvitationProcessor(
         var invitation = await invitations.GetByIdAsync(new AccessInvitationId(invitationId), true, ct);
         if (invitation is null || !invitation.IsUsable(DateTime.UtcNow)) return;
 
-        var bypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
+        var bypass = IsInvitationBypassEnabled();
         if (bypass)
         {
-            if (!environment.IsDevelopment())
-                throw new InvalidOperationException("AccessInvitations:BypassEmailAcceptance is permitted only in Development.");
-            var password = configuration["AccessInvitations:DevelopmentDefaultPassword"];
-            if (string.IsNullOrWhiteSpace(password))
-                throw new InvalidOperationException("AccessInvitations:DevelopmentDefaultPassword is required when bypass is enabled.");
+            // QA bypass is restricted to explicit staging configuration. It bypasses
+            // email acceptance, NOT AuthGate authentication or tenant authorization.
+            var stagingQa = environment.IsStaging();
+            var password = stagingQa
+                ? configuration["QA:InvitationInitialPassword"]
+                : configuration["AccessInvitations:DevelopmentDefaultPassword"];
+            if (string.IsNullOrWhiteSpace(password) || (stagingQa && password.Length < 12))
+                throw new InvalidOperationException(stagingQa
+                    ? "QA:InvitationInitialPassword must be configured with at least 12 characters in staging."
+                    : "AccessInvitations:DevelopmentDefaultPassword is required when bypass is enabled.");
             await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct);
             return;
         }
@@ -97,9 +102,7 @@ public sealed class AccessInvitationProcessor(
             if (attached.Count == 0 || attached.All(x => x.Status != PedagoraPilot.Domain.Workplace.WorkplaceTutorAssignmentStatus.Pending))
                 throw new UnauthorizedAccessException("WORKPLACE_TUTOR_INVITATION_REVOKED");
         }
-        var bypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
-        if (bypass && !environment.IsDevelopment())
-            throw new InvalidOperationException("AccessInvitations:BypassEmailAcceptance is permitted only in Development.");
+        var bypass = IsInvitationBypassEnabled();
         var existingActive = await identity.ExistingActiveIdentityAsync(invitation.Email, ct);
         if (!bypass && !existingActive && string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("ACCESS_INVITATION_PASSWORD_REQUIRED");
@@ -116,6 +119,20 @@ public sealed class AccessInvitationProcessor(
         // The identity must therefore be confirmed for this invitation even when bypass is disabled.
         var userId = await AcceptCoreAsync(invitation, password, emailConfirmed: true, ct, authenticatedSubject);
         return new AcceptedAccessInvitationResult(userId, invitation.Email);
+    }
+
+    private bool IsInvitationBypassEnabled()
+    {
+        // Never silently allow the legacy local-development bypass in staging.
+        var legacyBypass = configuration.GetValue<bool>("AccessInvitations:BypassEmailAcceptance");
+        if (legacyBypass && !environment.IsDevelopment())
+            throw new InvalidOperationException("AccessInvitations:BypassEmailAcceptance is permitted only in Development.");
+
+        var qaBypass = configuration.GetValue<bool>("QA:BypassInvitationAcceptance");
+        if (qaBypass && (!environment.IsStaging() || !configuration.GetValue<bool>("QA:Enabled")))
+            throw new InvalidOperationException("QA:BypassInvitationAcceptance requires QA:Enabled in Staging.");
+
+        return legacyBypass || qaBypass;
     }
 
     private async Task<Guid> AcceptCoreAsync(AccessInvitation invitation, string? password, bool emailConfirmed, CancellationToken ct, Guid? expectedOidcSubject = null)
