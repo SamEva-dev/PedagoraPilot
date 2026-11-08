@@ -41,7 +41,8 @@ public sealed class AuthGateApplicationIdentityAccess(IHttpClientFactory httpCli
             // The invitation holder just selected their own password; this is not a temporary password.
             requirePasswordChange = false,
             request.EmailConfirmed,
-            expectedOidcSubject = request.ExpectedOidcSubject
+            expectedOidcSubject = request.ExpectedOidcSubject,
+            reactivateRevokedMembership = request.ReactivateRevokedMembership
         });
         var client = httpClientFactory.CreateClient("AuthGateInternalAccess");
         using var response = await client.SendAsync(message, cancellationToken);

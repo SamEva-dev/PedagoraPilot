@@ -123,7 +123,7 @@ public sealed class AccessController(
         });
     }
 
-    [HttpGet("trainers"), HasPermission(PedagoraPilotPermissionCodes.Cohorts.Manage)]
+    [HttpGet("trainers"), HasPermission(PedagoraPilotPermissionCodes.Sessions.Manage)]
     public async Task<IActionResult> Trainers(CancellationToken ct)
     {
         if (!current.OrganizationId.HasValue || current.OrganizationId.Value == Guid.Empty) return Forbid();

@@ -8,7 +8,8 @@ public sealed record EnsureApplicationIdentityRequest(
     string Role,
     string? InitialPassword,
     bool EmailConfirmed,
-    Guid? ExpectedOidcSubject = null);
+    Guid? ExpectedOidcSubject = null,
+    bool ReactivateRevokedMembership = false);
 
 public sealed record EnsureApplicationIdentityResult(Guid UserId, bool ExistingIdentity, bool AccessActive);
 

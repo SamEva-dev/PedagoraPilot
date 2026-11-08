@@ -143,7 +143,7 @@ public sealed class AccessInvitationProcessor(
         {
             var provisioned = await identity.EnsureAsync(new EnsureApplicationIdentityRequest(
                 invitation.OrganizationId, invitation.Email, invitation.FirstName, invitation.LastName,
-                invitation.RequestedRole, password, emailConfirmed, expectedOidcSubject), ct);
+                invitation.RequestedRole, password, emailConfirmed, expectedOidcSubject, ReactivateRevokedMembership: true), ct);
 
             // AuthGate is the authority for application access. A provisioning response
             // describing inactive application access must never authorize a local membership,
@@ -163,10 +163,8 @@ public sealed class AccessInvitationProcessor(
                 }
                 else
                 {
-                    // An invitation must never reactivate a suspended business membership.
-                    if (!member.IsActive)
-                        throw new UnauthorizedAccessException("ACCESS_MEMBER_INACTIVE");
-
+                    // A new invitation explicitly issued by an Access.Manage administrator
+                    // is the reinstatement workflow. Never resurrect other organization scopes.
                     member.SynchronizeIdentity(invitation.Email, invitation.FirstName, invitation.LastName, true);
                 }
 
