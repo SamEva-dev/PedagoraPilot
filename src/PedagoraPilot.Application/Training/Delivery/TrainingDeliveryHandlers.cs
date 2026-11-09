@@ -85,7 +85,7 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
         var cohort = await cohorts.GetByIdAsync(request.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         EnsureOrganizationScope(cohort.OrganizationId, currentUser);
         await ContextualScope.EnsureCanManageCohortAsync(currentUser, cohort, offerings, ct);
-        await EnsureTrainerAssignmentAsync(currentUser, trainerAssignments, cohort.OrganizationId, cohort.Id, ct);
+        await EnsureTrainerAssignmentAsync(currentUser, members, trainerAssignments, cohort.OrganizationId, cohort.Id, ct);
         if (cohort.Status is CohortStatus.Completed or CohortStatus.Cancelled)
             throw new ConflictApplicationException(ErrorKeys.CohortClosed);
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
@@ -98,14 +98,34 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);
     }
 
-    // A Trainer role cannot use a broad cohort scope or a manually supplied trainer id
-    // to create sessions in a cohort to which the user is not actively assigned.
+    // Validate the CURRENT organization's persisted role profiles. JWT role strings are not
+    // authoritative for an assignment: they can be absent or stale after a role change.
+    // Supervisors and secretariat keep their explicitly granted session-management rights.
     internal static async Task EnsureTrainerAssignmentAsync(
-        ICurrentUser current, ICohortTrainerAssignmentRepository assignments,
+        ICurrentUser current, IOrganizationMemberRepository members,
+        ICohortTrainerAssignmentRepository assignments,
         Guid organizationId, CohortId cohortId, CancellationToken ct)
     {
-        if (!current.Roles.Contains("PedagoraPilot.Trainer")) return;
-        if (!current.UserId.HasValue) throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        if (!current.UserId.HasValue)
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+
+        var roles = await members.GetRoleCodesAsync(organizationId, current.UserId.Value, ct);
+        var privileged = roles.Any(role => role is
+            "PedagoraPilot.OrganizationAdministrator" or
+            "PedagoraPilot.OrganizationDirection" or
+            "PedagoraPilot.SiteDirection" or
+            "PedagoraPilot.PedagogicalManager" or
+            "PedagoraPilot.Secretariat") || current.IsPlatformAdministrator;
+        if (privileged) return;
+
+        // A standalone trainer must have a current assignment to this specific cohort.
+        // Do not silently bypass this rule when the JWT omits the role claim.
+        var trainer = roles.Contains("PedagoraPilot.Trainer") ||
+            current.Roles.Any(role => role.Equals("PedagoraPilot.Trainer", StringComparison.OrdinalIgnoreCase)
+                || role.Equals("Trainer", StringComparison.OrdinalIgnoreCase));
+        if (!trainer)
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+
         var assignment = await assignments.GetByUserAndCohortAsync(
             organizationId, current.UserId.Value, cohortId, false, ct);
         if (assignment?.IsActive != true)
@@ -187,7 +207,7 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
-        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
+        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, members, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
         await CreateTrainingSessionCommandHandler.ValidateParticipantsAsync(entity.CohortId, audienceMode, participantIds, enrollments, ct);
@@ -198,7 +218,7 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
     }
 }
 
-public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments) : IRequestHandler<CancelTrainingSessionCommand, TrainingSessionDto>
+public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationMemberRepository memberRoles) : IRequestHandler<CancelTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CancelTrainingSessionCommand request, CancellationToken ct)
     {
@@ -206,14 +226,14 @@ public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionReposito
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
-        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
+        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, memberRoles, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
         entity.Cancel();
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);
     }
 }
 
-public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments) : IRequestHandler<CompleteTrainingSessionCommand, TrainingSessionDto>
+public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationMemberRepository memberRoles) : IRequestHandler<CompleteTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CompleteTrainingSessionCommand request, CancellationToken ct)
     {
@@ -221,7 +241,7 @@ public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionReposi
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
-        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
+        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, memberRoles, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
         entity.Complete();
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);

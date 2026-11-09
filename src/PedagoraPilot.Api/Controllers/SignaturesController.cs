@@ -53,7 +53,7 @@ public sealed class SignaturesController(IMediator mediator, IObjectStorage stor
         return File(bytes, access.ContentType, access.FileName);
     }
 
-    [HttpGet("center"), HasPermission(PedagoraPilotPermissionCodes.Signatures.View)]
+    [HttpGet("center")]
     public Task<SignatureCenterPageDto> Center([FromQuery] int page = 1, [FromQuery] int pageSize = 25,
         [FromQuery] string? status = null, [FromQuery] Guid? cohortId = null,
         [FromQuery] bool team = false, CancellationToken ct = default)
@@ -113,21 +113,9 @@ public sealed class SignaturesController(IMediator mediator, IObjectStorage stor
     public Task<SignatureEnvelopeDto> RespondObservation(Guid id,
         [FromBody] SignatureAcknowledgementRequest request, CancellationToken ct)
         => mediator.Send(new RespondObservationSignatureCommand(new SignatureEnvelopeId(id), request.Acknowledge, request.Comment), ct);
-    [HttpGet("attendance/my-hours")]
-    public Task<LearnerAttendanceHoursDto> MyLearnerHours(CancellationToken ct)
-        => mediator.Send(new GetMyLearnerAttendanceHoursQuery(), ct);
-
     [HttpGet("attendance/my")]
     public Task<IReadOnlyCollection<SignatureEnvelopeDto>> MyAttendance(CancellationToken ct)
         => mediator.Send(new ListMyAttendanceSignaturesQuery(), ct);
-
-    [HttpGet("attendance/session/{sessionId:guid}/my-hours")]
-    public Task<AttendanceHoursSummaryDto> MySessionAttendanceHours(Guid sessionId, CancellationToken ct)
-        => mediator.Send(new GetSessionAttendanceHoursQuery(new TrainingSessionId(sessionId), true), ct);
-
-    [HttpGet("attendance/session/{sessionId:guid}/hours"), HasPermission(PedagoraPilotPermissionCodes.Signatures.View)]
-    public Task<AttendanceHoursSummaryDto> SessionAttendanceHours(Guid sessionId, CancellationToken ct)
-        => mediator.Send(new GetSessionAttendanceHoursQuery(new TrainingSessionId(sessionId)), ct);
 
     [HttpGet("attendance/session/{sessionId:guid}"), HasPermission(PedagoraPilotPermissionCodes.Signatures.View)]
     public Task<IReadOnlyCollection<SignatureEnvelopeDto>> SessionAttendance(Guid sessionId, CancellationToken ct)

@@ -21,18 +21,32 @@ public sealed class ListSignatureCenterQueryHandler(
     IProgramOfferingRepository offerings, ITrainingProgramRepository programs,
     ICohortTrainerAssignmentRepository assignments,
     IEnrollmentRepository enrollments, ILearnerProfileRepository profiles, IPersonRepository people,
-    ICurrentUser current, IObjectMapper mapper)
+    IOrganizationMemberRepository members, ICurrentUser current, IObjectMapper mapper)
     : IRequestHandler<ListSignatureCenterQuery, SignatureCenterPageDto>
 {
     public async Task<SignatureCenterPageDto> Handle(ListSignatureCenterQuery request, CancellationToken ct)
     {
-        if (!current.UserId.HasValue || !current.HasPermission(PedagoraPilotPermissionCodes.Signatures.View))
+        if (!current.UserId.HasValue ||
+            !(current.HasPermission(PedagoraPilotPermissionCodes.Signatures.View) ||
+              current.HasPermission(PedagoraPilotPermissionCodes.Signatures.Sign)))
             throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
         var organizationId = TenantScope.Organization(current)
             ?? throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        var activeRoles = await members.GetRoleCodesAsync(organizationId, current.UserId.Value, ct);
+        // Students must only see signatures addressed to them, even if a stale token
+        // mistakenly includes Signatures.View or the old UI still calls /center.
+        var personal = activeRoles.Contains("PedagoraPilot.Student") &&
+            !activeRoles.Any(role => role is "PedagoraPilot.OrganizationAdministrator" or
+                "PedagoraPilot.OrganizationDirection" or "PedagoraPilot.SiteDirection" or
+                "PedagoraPilot.PedagogicalManager" or "PedagoraPilot.Secretariat" or
+                "PedagoraPilot.Trainer" or "PedagoraPilot.Jury");
         var page = Math.Clamp(request.Page, 1, 100000);
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
         var authorId = current.UserId.Value.ToString("D");
+
+        if (personal) return await PersonalCenterAsync(organizationId, current.UserId.Value, request, page, pageSize, ct);
+        if (!current.HasPermission(PedagoraPilotPermissionCodes.Signatures.View))
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
 
         var scopedCohorts = await (from c in cohorts.Query(false)
             join o in offerings.Query(false) on c.ProgramOfferingId equals o.Id
@@ -91,6 +105,33 @@ public sealed class ListSignatureCenterQueryHandler(
             e.ReminderCount, e.Status == SignatureEnvelopeStatus.Declined ? e.ResponseComment : null,
             names.GetValueOrDefault(e.EnrollmentId.Value) ?? string.Empty)).ToArray(),
             total, page, pageSize, counts);
+    }
+
+    private async Task<SignatureCenterPageDto> PersonalCenterAsync(Guid organizationId, Guid signerId,
+        ListSignatureCenterQuery request, int page, int pageSize, CancellationToken ct)
+    {
+        // Server-authorized queue: never rely on a client-side Student mode,
+        // an email link, or RequestedByUserId (which is the teacher).
+        var query = envelopes.Query(false).Where(x => x.OrganizationId == organizationId
+            && x.SignerAuthGateUserId == signerId
+            && x.Status != SignatureEnvelopeStatus.Draft);
+        if (request.CohortId.HasValue) query = query.Where(x => x.CohortId == request.CohortId.Value);
+        var counts = (await query.GroupBy(x => x.Status)
+            .Select(group => new { group.Key, Count = group.Count() }).ToListAsync(ct))
+            .ToDictionary(row => row.Key.ToString().ToLowerInvariant(), row => row.Count);
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            if (!Enum.TryParse<SignatureEnvelopeStatus>(request.Status, true, out var status) || !Enum.IsDefined(status))
+                throw new ValidationApplicationException("SIGNATURE_CENTER_STATUS_INVALID");
+            query = query.Where(x => x.Status == status);
+        }
+        var total = await query.CountAsync(ct);
+        var rows = await query.OrderByDescending(x => x.CreatedAtUtc)
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return new SignatureCenterPageDto(rows.Select(x => new SignatureCenterItemDto(
+            SignatureDtoFactory.ToDto(x, mapper), x.ExpiresAtUtc, x.LastReminderAtUtc,
+            x.ReminderCount, x.Status == SignatureEnvelopeStatus.Declined ? x.ResponseComment : null,
+            string.Empty)).ToArray(), total, page, pageSize, counts);
     }
 }
 
