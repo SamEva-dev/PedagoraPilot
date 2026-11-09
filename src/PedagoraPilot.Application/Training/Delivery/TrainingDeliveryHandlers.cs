@@ -78,14 +78,14 @@ internal static class TrainingDeliveryMapper
         _ => throw new ValidationApplicationException(ErrorKeys.AttendanceStatusInvalid)};
 }
 
-public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ITrainingSessionRepository sessions, IOrganizationMemberRepository members, ICohortTrainerAssignmentRepository trainerAssignments, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<CreateTrainingSessionCommand, TrainingSessionDto>
+public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments, ITrainingSessionRepository sessions, IOrganizationMemberRepository members, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationRepository organizations, ICurrentUser currentUser, IObjectMapper mapper) : IRequestHandler<CreateTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CreateTrainingSessionCommand request, CancellationToken ct)
     {
         var cohort = await cohorts.GetByIdAsync(request.CohortId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
         EnsureOrganizationScope(cohort.OrganizationId, currentUser);
         await ContextualScope.EnsureCanManageCohortAsync(currentUser, cohort, offerings, ct);
-        await EnsureTrainerAssignmentAsync(currentUser, members, trainerAssignments, cohort.OrganizationId, cohort.Id, ct);
+        await EnsureTrainerAssignmentAsync(currentUser, members, trainerAssignments, organizations, cohort.OrganizationId, cohort.Id, ct);
         if (cohort.Status is CohortStatus.Completed or CohortStatus.Cancelled)
             throw new ConflictApplicationException(ErrorKeys.CohortClosed);
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
@@ -103,7 +103,7 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
     // Supervisors and secretariat keep their explicitly granted session-management rights.
     internal static async Task EnsureTrainerAssignmentAsync(
         ICurrentUser current, IOrganizationMemberRepository members,
-        ICohortTrainerAssignmentRepository assignments,
+        ICohortTrainerAssignmentRepository assignments, IOrganizationRepository organizations,
         Guid organizationId, CohortId cohortId, CancellationToken ct)
     {
         if (!current.UserId.HasValue)
@@ -117,6 +117,16 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
             "PedagoraPilot.PedagogicalManager" or
             "PedagoraPilot.Secretariat") || current.IsPlatformAdministrator;
         if (privileged) return;
+
+        // Register creates a personal organization whose owner may not have a
+        // materialized Direction role profile yet. Ownership is verified from the
+        // current tenant's persisted aggregate, never inferred from a JWT or email.
+        // The controller and contextual scope still enforce Sessions.Manage.
+        var ownsCurrentOrganization = await organizations.Query(false)
+            .AnyAsync(org => org.Id == organizationId
+                && org.OwnerUserId == current.UserId.Value
+                && org.Status == PedagoraPilot.Domain.Organizations.OrganizationStatus.Active, ct);
+        if (ownsCurrentOrganization) return;
 
         // A standalone trainer must have a current assignment to this specific cohort.
         // Do not silently bypass this rule when the JWT omits the role claim.
@@ -199,7 +209,7 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
     }
 }
 
-public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IOrganizationMemberRepository members, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments) : IRequestHandler<UpdateTrainingSessionCommand, TrainingSessionDto>
+public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, IOrganizationMemberRepository members, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationRepository organizations) : IRequestHandler<UpdateTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(UpdateTrainingSessionCommand request, CancellationToken ct)
     {
@@ -207,7 +217,7 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
-        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, members, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
+        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, members, trainerAssignments, organizations, entity.OrganizationId, entity.CohortId, ct);
         var audienceMode = TrainingDeliveryMapper.ParseAudienceMode(request.AudienceMode);
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
         await CreateTrainingSessionCommandHandler.ValidateParticipantsAsync(entity.CohortId, audienceMode, participantIds, enrollments, ct);
@@ -218,7 +228,7 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
     }
 }
 
-public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationMemberRepository memberRoles) : IRequestHandler<CancelTrainingSessionCommand, TrainingSessionDto>
+public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationMemberRepository memberRoles, IOrganizationRepository organizations) : IRequestHandler<CancelTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CancelTrainingSessionCommand request, CancellationToken ct)
     {
@@ -226,14 +236,14 @@ public sealed class CancelTrainingSessionCommandHandler(ITrainingSessionReposito
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
-        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, memberRoles, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
+        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, memberRoles, trainerAssignments, organizations, entity.OrganizationId, entity.CohortId, ct);
         entity.Cancel();
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);
     }
 }
 
-public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationMemberRepository memberRoles) : IRequestHandler<CompleteTrainingSessionCommand, TrainingSessionDto>
+public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionRepository sessions, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICurrentUser currentUser, IObjectMapper mapper, IEnrollmentRepository enrollments, ICohortTrainerAssignmentRepository trainerAssignments, IOrganizationMemberRepository memberRoles, IOrganizationRepository organizations) : IRequestHandler<CompleteTrainingSessionCommand, TrainingSessionDto>
 {
     public async Task<TrainingSessionDto> Handle(CompleteTrainingSessionCommand request, CancellationToken ct)
     {
@@ -241,7 +251,7 @@ public sealed class CompleteTrainingSessionCommandHandler(ITrainingSessionReposi
         CreateTrainingSessionCommandHandler.EnsureOrganizationScope(entity.OrganizationId, currentUser);
         await TrainingSessionContextualAccess.EnsureAsync(entity, cohorts, offerings, currentUser, manage: true, ct);
         CreateTrainingSessionCommandHandler.EnsureTrainerCanManage(entity, currentUser);
-        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, memberRoles, trainerAssignments, entity.OrganizationId, entity.CohortId, ct);
+        await CreateTrainingSessionCommandHandler.EnsureTrainerAssignmentAsync(currentUser, memberRoles, trainerAssignments, organizations, entity.OrganizationId, entity.CohortId, ct);
         entity.Complete();
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);
