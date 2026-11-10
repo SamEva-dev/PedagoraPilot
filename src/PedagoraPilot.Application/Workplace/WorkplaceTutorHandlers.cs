@@ -87,10 +87,24 @@ public sealed class GetAssignedTutorPeriodsQueryHandler(
         var (organizationId, userId) = await WorkplaceTutorAuthorization.RequireActiveMemberAsync(current, members, false, ct);
         var ids = await assignments.GetActivePeriodIdsAsync(organizationId, userId, ct);
         if (ids.Count == 0) return [];
-        var periodIds = ids.ToArray();
-        var rows = await periods.Query(false).Where(p => p.OrganizationId == organizationId && periodIds.Contains(p.Id.Value) && p.Status != WorkplacePeriodStatus.Cancelled && p.Status != WorkplacePeriodStatus.Archived && p.Status != WorkplacePeriodStatus.Deleted)
-            .Include(p => p.Activities).Include(p => p.Documents).Include(p => p.Evaluations)
-            .AsSplitQuery().OrderByDescending(p => p.StartDate).ToListAsync(ct);
+        // WorkplacePeriodId is an EF-converted value object. A predicate on
+        // p.Id.Value cannot always be translated by Npgsql (HTTP 500).
+        // Use an equality on the mapped identifier for each assigned period.
+        // Never load unassigned periods and filter them in memory.
+        var rows = new List<WorkplacePeriod>();
+        foreach (var assignedId in ids.Distinct())
+        {
+            var periodId = new WorkplacePeriodId(assignedId);
+            var period = await periods.Query(false)
+                .Where(p => p.OrganizationId == organizationId && p.Id == periodId
+                    && p.Status != WorkplacePeriodStatus.Cancelled
+                    && p.Status != WorkplacePeriodStatus.Archived
+                    && p.Status != WorkplacePeriodStatus.Deleted)
+                .Include(p => p.Activities).Include(p => p.Documents).Include(p => p.Evaluations)
+                .AsSplitQuery().SingleOrDefaultAsync(ct);
+            if (period is not null) rows.Add(period);
+        }
+        rows = rows.OrderByDescending(p => p.StartDate).ToList();
         var result = new List<WorkplacePeriodDto>(rows.Count);
         foreach (var period in rows)
             result.Add(WorkplaceTutorAuthorization.Redact(await WorkplaceDtoFactory.Period(period, people, profiles, enrollments, mapper, ct)));
