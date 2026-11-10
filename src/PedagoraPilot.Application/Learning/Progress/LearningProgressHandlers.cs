@@ -185,7 +185,7 @@ public sealed class DeleteCompetencyDefinitionCommandHandler(ICompetencyDefiniti
     }
 }
 
-public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerCompetenciesQuery, IReadOnlyCollection<LearnerCompetencyDto>>
+public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records, IDrivingEvaluationRepository driving, ILearnerProfileRepository profiles, IPersonRepository people, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<GetLearnerCompetenciesQuery, IReadOnlyCollection<LearnerCompetencyDto>>
 {
     public async Task<IReadOnlyCollection<LearnerCompetencyDto>> Handle(GetLearnerCompetenciesQuery r, CancellationToken ct)
     {
@@ -197,10 +197,14 @@ public sealed class GetLearnerCompetenciesQueryHandler(IEnrollmentRepository enr
         var defs = await definitions.Query(false).Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId && x.Active).OrderBy(x => x.SortOrder).ToListAsync(ct);
         var rows = await records.Query(false).Where(x => x.EnrollmentId == r.EnrollmentId).ToListAsync(ct);
         var byDefinition = rows.ToDictionary(x => x.CompetencyDefinitionId);
+        var historical = await DrivingCompetencyReadProjection.BuildAsync(
+            driving, enrollment.OrganizationId, [enrollment.Id], defs, ct);
         return defs.Select(d =>
         {
             byDefinition.TryGetValue(d.Id, out var row);
-            return row is null ? new LearnerCompetencyDto(Guid.Empty, enrollment.Id.Value, d.Id.Value, d.Code, d.Title, LearningProgressDtoFactory.LevelCode(CompetencyLevel.NotAssessed), null, null, null, null) : LearningProgressDtoFactory.Competency(row, d, mapper);
+            if (row is not null) return LearningProgressDtoFactory.Competency(row, d, mapper);
+            if (historical.TryGetValue((enrollment.Id, d.Id), out var previous)) return previous;
+            return new LearnerCompetencyDto(Guid.Empty, enrollment.Id.Value, d.Id.Value, d.Code, d.Title, LearningProgressDtoFactory.LevelCode(CompetencyLevel.NotAssessed), null, null, null, null);
         }).ToArray();
     }
 }
@@ -524,7 +528,7 @@ public sealed class GetDrivingEvaluationsQueryHandler(IDrivingEvaluationReposito
     }
 }
 
-public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, IOrganizationMemberRepository members, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
+public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository enrollments, ICohortRepository cohorts, IProgramOfferingRepository offerings, ICompetencyDefinitionRepository definitions, ITrainingSessionRepository sessions, IDrivingEvaluationRepository evaluations, ILearnerCompetencyRecordRepository competencyRecords, IOrganizationMemberRepository members, IObjectMapper mapper, ICurrentUser current) : IRequestHandler<RecordDrivingEvaluationCommand, DrivingEvaluationDto>
 {
     public async Task<DrivingEvaluationDto> Handle(RecordDrivingEvaluationCommand r, CancellationToken ct)
     {
@@ -555,6 +559,7 @@ public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository 
         if (r.Criteria is null || r.Criteria.Count == 0 || r.Criteria.Count > allowed.Count)
             throw new ValidationApplicationException(ErrorKeys.DrivingCriteriaInvalid);
         var criteria = new List<(string, string, CompetencyLevel)>();
+        var assessedDefinitions = new List<(CompetencyDefinition Definition, CompetencyLevel Level)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in r.Criteria)
         {
@@ -565,6 +570,7 @@ public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository 
                 || !Enum.IsDefined(level))
                 throw new ValidationApplicationException(ErrorKeys.CompetencyLevelInvalid);
             criteria.Add((criterion.Code, criterion.Title, level));
+            assessedDefinitions.Add((criterion, level));
         }
 
         var trainer = await PedagoraPilot.Application.Training.Delivery.CreateTrainingSessionCommandHandler.VerifiedTrainerAsync(
@@ -576,6 +582,22 @@ public sealed class RecordDrivingEvaluationCommandHandler(IEnrollmentRepository 
             DateTimeOffset.UtcNow, trainer.Id, trainer.Name, r.Subject,
             r.Positive, r.Difficulty, r.NextGoal, r.FreeObservation, criteria);
         await evaluations.AddAsync(entity, ct);
+        // A driving evaluation and its competency outcomes are one business operation.
+        // Update the canonical learner competency records used by Skills, cohort progression
+        // and the learner dossier. This is not a client-side synthetic percentage.
+        // Keep the matching enrollment and current referential definition IDs.
+        Guid? evaluatorId = Guid.TryParse(trainer.Id, out var parsedEvaluatorId)
+            ? parsedEvaluatorId : null;
+        foreach (var (assessedDefinition, level) in assessedDefinitions)
+        {
+            var progress = await competencyRecords.FindAsync(enrollment.Id, assessedDefinition.Id, true, ct);
+            if (progress is null)
+            {
+                progress = LearnerCompetencyRecord.Create(enrollment.OrganizationId, enrollment.Id, assessedDefinition.Id);
+                await competencyRecords.AddAsync(progress, ct);
+            }
+            progress.Evaluate(level, null, null, evaluatorId, trainer.Name, entity.EvaluatedAtUtc);
+        }
         return LearningProgressDtoFactory.Driving(entity, mapper);
     }
 }

@@ -14,6 +14,7 @@ public sealed class GetCohortCompetenciesQueryHandler(
     ICohortRepository cohorts, IProgramOfferingRepository offerings, IEnrollmentRepository enrollments,
     ILearnerProfileRepository profiles, IPersonRepository people,
     ICompetencyDefinitionRepository definitions, ILearnerCompetencyRecordRepository records,
+    IDrivingEvaluationRepository driving,
     IObjectMapper mapper, ICurrentUser current)
     : IRequestHandler<GetCohortCompetenciesQuery, IReadOnlyCollection<CohortCompetencyRowDto>>
 {
@@ -48,6 +49,8 @@ public sealed class GetCohortCompetenciesQueryHandler(
         var evaluations = await records.Query(false).Where(x => memberIds.Contains(x.EnrollmentId))
             .ToListAsync(ct);
         var evaluated = evaluations.ToDictionary(x => (x.EnrollmentId, x.CompetencyDefinitionId));
+        var drivingFallback = await DrivingCompetencyReadProjection.BuildAsync(
+            driving, cohort.OrganizationId, memberIds, defs, ct);
 
         return members.Select(member =>
         {
@@ -56,9 +59,11 @@ public sealed class GetCohortCompetenciesQueryHandler(
             var rows = defs.Select(def =>
                 evaluated.TryGetValue((member.Id, def.Id), out var record)
                     ? LearningProgressDtoFactory.Competency(record, def, mapper)
-                    : new LearnerCompetencyDto(Guid.Empty, member.Id.Value, def.Id.Value,
-                        def.Code, def.Title, LearningProgressDtoFactory.LevelCode(CompetencyLevel.NotAssessed),
-                        null, null, null, null)).ToArray();
+                    : drivingFallback.TryGetValue((member.Id, def.Id), out var historical)
+                        ? historical
+                        : new LearnerCompetencyDto(Guid.Empty, member.Id.Value, def.Id.Value,
+                            def.Code, def.Title, LearningProgressDtoFactory.LevelCode(CompetencyLevel.NotAssessed),
+                            null, null, null, null)).ToArray();
             return new CohortCompetencyRowDto(member.Id.Value, person.FirstName, person.LastName, rows);
         }).ToArray();
     }
