@@ -56,7 +56,8 @@ internal static class LearningProgressDtoFactory
             p.EvaluationCriteria
                 .OrderBy(x => x.Code)
                 .Select(x => new TopicEvaluationCriterionDto(x.Id.Value, x.Code, TopicEvaluationLevelCode(x.Level)))
-                .ToArray());
+                .ToArray(),
+            p.PreparationContent);
     }
 
     public static DrivingEvaluationDto Driving(DrivingEvaluation x, IObjectMapper mapper)

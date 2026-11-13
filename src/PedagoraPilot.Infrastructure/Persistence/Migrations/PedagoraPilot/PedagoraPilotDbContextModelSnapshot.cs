@@ -1903,6 +1903,10 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("PreparationContent")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
                     b.Property<DateOnly?>("PreparationDate")
                         .HasColumnType("date");
 

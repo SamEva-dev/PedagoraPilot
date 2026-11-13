@@ -70,6 +70,7 @@ public sealed class LearnerTopicProgressConfiguration : IEntityTypeConfiguration
         b.Property(x => x.EnrollmentId).HasConversion(x => x.Value, x => new EnrollmentId(x));
         b.Property(x => x.TopicId).HasConversion(x => x.Value, x => new PedagogicalTopicId(x));
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
+        b.Property(x => x.PreparationContent).HasMaxLength(8000);
         b.Property(x => x.EvaluatorDisplayName).HasMaxLength(200);
         b.Property(x => x.PositivePoints).HasMaxLength(2000);
         b.Property(x => x.Improvements).HasMaxLength(2000);

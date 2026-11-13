@@ -59,6 +59,11 @@ public sealed class LearningProgressController(IMediator mediator) : ControllerB
     [HttpPut("enrollments/{enrollmentId:guid}/topics/{topicId:guid}")]
     [HasPermission(PedagoraPilotPermissionCodes.Sheets.Manage)]
     public Task<LearnerTopicProgressDto> UpdateTopic(Guid enrollmentId, Guid topicId, [FromBody] UpdateTopicProgressRequest request, CancellationToken ct) => mediator.Send(new UpdateTopicProgressCommand(new EnrollmentId(enrollmentId), new PedagogicalTopicId(topicId), request.Status, request.PreparationDate, request.PresentationDate, request.PresentationDurationMinutes, request.EvaluatorDisplayName, request.PositivePoints, request.Improvements, request.Comment, request.NextObjective, request.EvaluationCriteria), ct);
+    [HttpPut("enrollments/{enrollmentId:guid}/topics/{topicId:guid}/preparation")]
+    [HasPermission(PedagoraPilotPermissionCodes.Sheets.View)]
+    public Task<LearnerTopicProgressDto> SavePreparation(Guid enrollmentId, Guid topicId, [FromBody] SaveTopicPreparationRequest request, CancellationToken ct)
+        => mediator.Send(new SaveTopicPreparationCommand(new EnrollmentId(enrollmentId), new PedagogicalTopicId(topicId), request.Content, request.Submit), ct);
+
     [HttpGet("enrollments/{enrollmentId:guid}/driving-evaluations")]
     [HasPermission(PedagoraPilotPermissionCodes.Driving.View)]
     public Task<IReadOnlyCollection<DrivingEvaluationDto>> GetDriving(Guid enrollmentId, CancellationToken ct) => mediator.Send(new GetDrivingEvaluationsQuery(new EnrollmentId(enrollmentId)), ct);

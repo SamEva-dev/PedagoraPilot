@@ -27,7 +27,9 @@ public sealed record LearnerTopicProgressDto(
     string? Improvements,
     string? Comment,
     string? NextObjective,
-    IReadOnlyCollection<TopicEvaluationCriterionDto> EvaluationCriteria);
+    IReadOnlyCollection<TopicEvaluationCriterionDto> EvaluationCriteria,
+    string? PreparationContent = null);
+public sealed record SaveTopicPreparationRequest(string? Content, bool Submit);
 public sealed record UpdateTopicProgressRequest(
     string Status,
     DateOnly? PreparationDate,

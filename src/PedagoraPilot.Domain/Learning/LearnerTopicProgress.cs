@@ -38,6 +38,7 @@ public sealed class LearnerTopicProgress : AggregateRoot<LearnerTopicProgressId>
     public PedagogicalTopicId TopicId { get; private set; }
     public TopicProgressStatus Status { get; private set; }
     public DateOnly? PreparationDate { get; private set; }
+    public string? PreparationContent { get; private set; }
     public DateOnly? PresentationDate { get; private set; }
     public int? PresentationDurationMinutes { get; private set; }
     public string? EvaluatorDisplayName { get; private set; }
@@ -99,6 +100,23 @@ public sealed class LearnerTopicProgress : AggregateRoot<LearnerTopicProgressId>
         UpdatedAtUtc = DateTime.UtcNow;
         var @event = new LearnerTopicProgressUpdatedDomainEvent(Id, EnrollmentId, TopicId, OrganizationId);
         RaiseDomainEvent(@event);
+    }
+
+    // Learner-owned preparation never edits the trainer's assessment fields.
+    public void SavePreparation(string? content, bool submit)
+    {
+        if (Status is TopicProgressStatus.Presented or TopicProgressStatus.Validated)
+            throw new DomainException("TOPIC_PREPARATION_LOCKED");
+        if (Status == TopicProgressStatus.Ready)
+            throw new DomainException("TOPIC_PREPARATION_ALREADY_SUBMITTED");
+        var normalized = Normalize(content, 8000);
+        if (submit && string.IsNullOrWhiteSpace(normalized))
+            throw new DomainException("TOPIC_PREPARATION_CONTENT_REQUIRED");
+        PreparationContent = normalized;
+        Status = submit ? TopicProgressStatus.Ready : TopicProgressStatus.InProgress;
+        PreparationDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        UpdatedAtUtc = DateTime.UtcNow;
+        RaiseDomainEvent(new LearnerTopicProgressUpdatedDomainEvent(Id, EnrollmentId, TopicId, OrganizationId));
     }
 
     private static string? Normalize(string? value, int max)
