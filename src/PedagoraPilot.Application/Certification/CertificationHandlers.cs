@@ -45,7 +45,7 @@ public sealed class GetCertificationSchemesQueryHandler(ICertificationSchemeRepo
         }
         if (r.ReferentialVersionId.HasValue)
             q = q.Where(x => x.ReferentialVersionId == r.ReferentialVersionId);
-        var rows = await q.OrderBy(x => x.Name).ToListAsync(ct);
+        var rows = await q.OrderByDescending(x => x.Status == CertificationSchemeStatus.Published).ThenBy(x => x.Name).ToListAsync(ct);
         return rows.Select(CertMap.Scheme).ToArray();
     }
 }

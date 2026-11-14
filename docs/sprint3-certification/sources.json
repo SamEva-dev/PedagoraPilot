@@ -1,0 +1,16 @@
+{
+  "TP-ECSR-Pilot/QA Test/campagne13-20261114.zip": {
+    "sha256": "78c7e340d3b80339990e9159b33e28abcf20e7015e57b0d0ecc7dd49fca72c99",
+    "bytes": 8715573
+  },
+  "TP-ECSR-Pilot/QA Test/PedagoraPilotCahierRecetteQA.docx": {
+    "sha256": "d194b60584161360a8a12e3c09d08cfb0a45c1f73977ac1fa59f87c5474bd4c7",
+    "bytes": 162341
+  },
+  "PedagoraPilotAPI": {
+    "commit": "cfcc5e2a62ec52e98c7ae5d4459274733672da31"
+  },
+  "TP-ECSR-Pilot": {
+    "commit": "1073daefcfdb68f50df404a2fd0a685dbbc37587"
+  }
+}

@@ -231,6 +231,9 @@ public static class ErrorKeys
     public const string CertificationAssessmentsRequired = "CERTIFICATION_ASSESSMENTS_REQUIRED";
     public const string CertificationAssessmentDuplicateStep = "CERTIFICATION_ASSESSMENT_DUPLICATE_STEP";
     public const string CertificationCommentTooLong = "CERTIFICATION_COMMENT_TOO_LONG";
+    public const string CertificationSchemeAlreadyExists = "CERTIFICATION_SCHEME_ALREADY_EXISTS";
+    public const string CertificationStepKindInvalid = "CERTIFICATION_STEP_KIND_INVALID";
+    public const string CertificationEffectiveDateRequired = "CERTIFICATION_EFFECTIVE_DATE_REQUIRED";
     public const string CertificationSchemeNotFound = "CERTIFICATION_SCHEME_NOT_FOUND";
     public const string CertificationSessionNotFound = "CERTIFICATION_SESSION_NOT_FOUND";
     public const string CertificationCandidateNotFound = "CERTIFICATION_CANDIDATE_NOT_FOUND";

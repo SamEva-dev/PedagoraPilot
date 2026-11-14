@@ -1,0 +1,62 @@
+[
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/AUDIT.md",
+    "action": "add",
+    "sha256": "e668531688571dfaf4078583955010c684c1b62e589dc666d199c94b74ef45f9"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/README.md",
+    "action": "add",
+    "sha256": "efb382423a942a9aa6063ca0259e69becbb7f03edaed4b8c0b8792dfd0dbb350"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/sources.json",
+    "action": "add",
+    "sha256": "847b7a61beb53e7399b37ad10c1121e0c1eef97e99d154e554e22f60f206ca7b"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/baseline.json",
+    "action": "add",
+    "sha256": "25a66ef6c594a10a2dc834c5e9a97260a9028281ef6b30e5d61f2cf9d6e6bd1d"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/build-angular.log",
+    "action": "add",
+    "sha256": "c81435a0f350a48a857d74aac0c998212c6cc47905aad80a0069971362826380"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/build-dotnet.log",
+    "action": "add",
+    "sha256": "d06b1c8f326c2303ee4d1c04b5c812a308bdd7170eac9b542fc120ad4855b369"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/tests-angular-watch.log",
+    "action": "add",
+    "sha256": "ce061f69779f4ba1415eba5bf9813b96bb248e7cb607ce2ee94f2060e18c0654"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/tests-angular.log",
+    "action": "add",
+    "sha256": "c5c512ee72ef608733f2d7c6ff39a027f3572d1ae836d5c2b390b5a25da14cb2"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/tests-api.log",
+    "action": "add",
+    "sha256": "de781f7a6aea30c25ba3a70ff55776e6e8ff5c1728068ada6a45644f566043fb"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/tests-application.log",
+    "action": "add",
+    "sha256": "06eb5e842dd34048a18d0462adb5a190dbb60b6950ea875d214398edc030c1fb"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/tests-architecture.log",
+    "action": "add",
+    "sha256": "1c728c41c6ec7d51330578b1841af4d91741c9a500ee4b6ddf653015ab858a1b"
+  },
+  {
+    "path": "PedagoraPilotAPI/docs/sprint3-certification/validation/tests-domain.log",
+    "action": "add",
+    "sha256": "61b66f98558f53308d45d6577418e7a2c966e40380173205e833ee924aa86f79"
+  }
+]

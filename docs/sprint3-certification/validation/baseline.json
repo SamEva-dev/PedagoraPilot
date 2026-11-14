@@ -1,0 +1,58 @@
+[
+  {
+    "name": "build-dotnet",
+    "jobId": "eb9ef4ec-1663-447f-8f36-f5cf391c7fa0",
+    "status": "exited",
+    "exitCode": 0,
+    "command": "dotnet build PedagoraPilot.slnx --nologo"
+  },
+  {
+    "name": "build-angular",
+    "jobId": "32310534-cf03-4feb-9996-4e543074c86a",
+    "status": "exited",
+    "exitCode": 1,
+    "command": "npm run build"
+  },
+  {
+    "name": "tests-domain",
+    "jobId": "ab91c1f7-a63b-4921-ad3f-afe775e21633",
+    "status": "exited",
+    "exitCode": 0,
+    "command": "dotnet test tests/PedagoraPilot.Domain.UnitTests/PedagoraPilot.Domain.UnitTests.csproj --no-build --nologo"
+  },
+  {
+    "name": "tests-application",
+    "jobId": "724c6187-5abe-48b3-8c7b-2e5b01369ea2",
+    "status": "exited",
+    "exitCode": 1,
+    "command": "dotnet test tests/PedagoraPilot.Application.UnitTests/PedagoraPilot.Application.UnitTests.csproj --no-build --nologo"
+  },
+  {
+    "name": "tests-api",
+    "jobId": "653e75d1-acca-40eb-b655-5d2e02fc1a27",
+    "status": "exited",
+    "exitCode": 0,
+    "command": "dotnet test tests/PedagoraPilot.Api.UnitTests/PedagoraPilot.Api.UnitTests.csproj --no-build --nologo"
+  },
+  {
+    "name": "tests-architecture",
+    "jobId": "56a57092-4b3c-449e-b786-828669513af3",
+    "status": "exited",
+    "exitCode": 0,
+    "command": "dotnet test tests/PedagoraPilot.ArchitectureTests/PedagoraPilot.ArchitectureTests.csproj --no-build --nologo"
+  },
+  {
+    "name": "tests-angular-watch",
+    "jobId": "98eafe67-b233-47c8-9831-933ea8401bee",
+    "status": "exited",
+    "exitCode": 1,
+    "command": "npm test -- --watch=false"
+  },
+  {
+    "name": "tests-angular",
+    "jobId": "50ad84cf-1bdb-4c9e-b25e-63e9a099aabb",
+    "status": "exited",
+    "exitCode": 1,
+    "command": "npm test"
+  }
+]

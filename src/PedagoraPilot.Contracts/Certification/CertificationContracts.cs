@@ -25,3 +25,8 @@ public sealed record EvaluateEligibilityRequest(bool Eligible, IReadOnlyCollecti
 public sealed record RecordCertificationAssessmentRequest(Guid StepDefinitionId, string JuryDisplayName, string Outcome, decimal? Score, string? Comment);
 public sealed record RecordCertificationAssessmentBatchRequest(IReadOnlyCollection<RecordCertificationAssessmentRequest>? Assessments, bool Finalize);
 public sealed record RecordCertificationDecisionRequest(string Decision, string? Comment);
+
+public sealed record CreateCertificationSchemeRequest(Guid ReferentialVersionId, string Code, string Name);
+public sealed record AddCertificationUnitRequest(string Code, string Title, int SortOrder);
+public sealed record AddCertificationStepRequest(Guid? UnitId, string Code, string Title, string Kind, int DurationMinutes, int SortOrder);
+public sealed record PublishCertificationSchemeRequest(DateOnly EffectiveFrom, DateOnly? EffectiveTo);

@@ -16,6 +16,26 @@ public sealed class CertificationController(IMediator mediator) : ControllerBase
     [HttpGet("schemes")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.View)]
     public Task<IReadOnlyCollection<CertificationSchemeDto>> Schemes([FromQuery] Guid? referentialVersionId, CancellationToken ct) => mediator.Send(new GetCertificationSchemesQuery(referentialVersionId), ct);
+    [HttpPost("schemes")]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
+    public Task<CertificationSchemeDto> CreateScheme(CreateCertificationSchemeRequest r, CancellationToken ct) =>
+        mediator.Send(new CreateCertificationSchemeCommand(r.ReferentialVersionId, r.Code, r.Name), ct);
+
+    [HttpPost("schemes/{id:guid}/units")]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
+    public Task<CertificationSchemeDto> AddUnit(Guid id, AddCertificationUnitRequest r, CancellationToken ct) =>
+        mediator.Send(new AddCertificationUnitCommand(new CertificationSchemeId(id), r.Code, r.Title, r.SortOrder), ct);
+
+    [HttpPost("schemes/{id:guid}/steps")]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
+    public Task<CertificationSchemeDto> AddStep(Guid id, AddCertificationStepRequest r, CancellationToken ct) =>
+        mediator.Send(new AddCertificationStepCommand(new CertificationSchemeId(id), r.UnitId, r.Code, r.Title, r.Kind, r.DurationMinutes, r.SortOrder), ct);
+
+    [HttpPost("schemes/{id:guid}/publish")]
+    [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
+    public Task<CertificationSchemeDto> PublishScheme(Guid id, PublishCertificationSchemeRequest r, CancellationToken ct) =>
+        mediator.Send(new PublishCertificationSchemeCommand(new CertificationSchemeId(id), r.EffectiveFrom, r.EffectiveTo), ct);
+
     [HttpGet("sessions")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.View)]
     public Task<IReadOnlyCollection<CertificationExamSessionDto>> Sessions([FromQuery] Guid? cohortId, CancellationToken ct) => mediator.Send(new GetCertificationExamSessionsQuery(cohortId.HasValue ? new CohortId(cohortId.Value) : null), ct);

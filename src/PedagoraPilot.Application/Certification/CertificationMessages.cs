@@ -18,3 +18,8 @@ public sealed record RecordCertificationAssessmentBatchCommand(CertificationCand
 public sealed record RecordCertificationDecisionCommand(CertificationCandidateId CandidateId, string Decision, string? Comment) : ICommand<CertificationCandidateDto>;
 public sealed record PublishCertificationResultsCommand(CertificationExamSessionId SessionId) : ICommand<CertificationExamSessionDto>;
 public sealed record AssignJuryCommand(CertificationExamSessionId SessionId, Guid AuthGateUserId, string DisplayName, string Role) : ICommand<JuryAssignmentDto>;
+
+public sealed record CreateCertificationSchemeCommand(Guid ReferentialVersionId, string Code, string Name) : ICommand<CertificationSchemeDto>;
+public sealed record AddCertificationUnitCommand(CertificationSchemeId SchemeId, string Code, string Title, int SortOrder) : ICommand<CertificationSchemeDto>;
+public sealed record AddCertificationStepCommand(CertificationSchemeId SchemeId, Guid? UnitId, string Code, string Title, string Kind, int DurationMinutes, int SortOrder) : ICommand<CertificationSchemeDto>;
+public sealed record PublishCertificationSchemeCommand(CertificationSchemeId SchemeId, DateOnly EffectiveFrom, DateOnly? EffectiveTo) : ICommand<CertificationSchemeDto>;
