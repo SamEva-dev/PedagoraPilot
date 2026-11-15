@@ -246,6 +246,9 @@ public static class ErrorKeys
     public const string CertificationDecisionInvalid = "CERTIFICATION_DECISION_INVALID";
     public const string CertificationCandidatesNotCompleted = "CERTIFICATION_CANDIDATES_NOT_COMPLETED";
     public const string CertificationSessionNotWritable = "CERTIFICATION_SESSION_NOT_WRITABLE";
+    public const string CertificationJuryRequiredToStart = "CERTIFICATION_JURY_REQUIRED_TO_START";
+    public const string CertificationCandidatesRequiredToStart = "CERTIFICATION_CANDIDATES_REQUIRED_TO_START";
+    public const string CertificationCandidatesNotReadyToStart = "CERTIFICATION_CANDIDATES_NOT_READY_TO_START";
     public const string CertificationAssessmentsIncomplete = "CERTIFICATION_ASSESSMENTS_INCOMPLETE";
     public const string CertificationForbidden = "CERTIFICATION_FORBIDDEN";
     public const string DistanceForbidden = "DISTANCE_FORBIDDEN";

@@ -11,6 +11,7 @@ using PedagoraPilot.Contracts.Certification;
 using PedagoraPilot.Domain.Certification;
 using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Training;
+using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Application.Certification;
 internal static class CertMap
@@ -206,7 +207,8 @@ public sealed class PlanCertificationExamSessionCommandHandler(ICertificationExa
 // Explicit lifecycle transition. Publishing must never implicitly start an exam session.
 public sealed class StartCertificationExamSessionCommandHandler(
     ICertificationExamSessionRepository sessions, ICohortRepository cohorts,
-    IProgramOfferingRepository offerings, ICurrentUser current)
+    IProgramOfferingRepository offerings, IJuryAssignmentRepository juries,
+    ICertificationCandidateRepository candidates, ICurrentUser current)
     : IRequestHandler<StartCertificationExamSessionCommand, CertificationExamSessionDto>
 {
     public async Task<CertificationExamSessionDto> Handle(StartCertificationExamSessionCommand r, CancellationToken ct)
@@ -215,6 +217,22 @@ public sealed class StartCertificationExamSessionCommandHandler(
             ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, session.OrganizationId);
         await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        // Keep the existing domain state transition authoritative. Validate its prerequisites
+        // before any mutation, using records scoped to this session and its organization.
+        if (session.Status != CertificationExamSessionStatus.Planned)
+            throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
+        var hasJury = await juries.Query(false).AnyAsync(x =>
+            x.OrganizationId == session.OrganizationId && x.ExamSessionId == session.Id, ct);
+        if (!hasJury)
+            throw new ConflictApplicationException(ErrorKeys.CertificationJuryRequiredToStart);
+        var candidateRows = await candidates.Query(false)
+            .Where(x => x.OrganizationId == session.OrganizationId && x.ExamSessionId == session.Id)
+            .Select(x => new { x.Eligible, x.Status })
+            .ToArrayAsync(ct);
+        if (candidateRows.Length == 0)
+            throw new ConflictApplicationException(ErrorKeys.CertificationCandidatesRequiredToStart);
+        if (candidateRows.Any(x => x.Eligible != true || x.Status != CertificationCandidateStatus.Eligible))
+            throw new ConflictApplicationException(ErrorKeys.CertificationCandidatesNotReadyToStart);
         session.Start();
         return CertMap.Session(session);
     }
@@ -388,7 +406,7 @@ public sealed class AssignJuryCommandHandler(ICertificationExamSessionRepository
             throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
 
         var juryRoles = await members.GetRoleCodesAsync(s.OrganizationId, r.AuthGateUserId, ct);
-        if (!juryRoles.Any(role => string.Equals(role, "jury", StringComparison.OrdinalIgnoreCase)))
+        if (!juryRoles.Any(role => string.Equals(role, PedagoraPilotRoleCodes.Jury, StringComparison.OrdinalIgnoreCase)))
             throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
 
         var alreadyAssigned = await juries.Query(false).AnyAsync(x =>
