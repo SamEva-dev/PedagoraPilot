@@ -39,6 +39,23 @@ public sealed class CertificationController(IMediator mediator) : ControllerBase
     [HttpGet("sessions")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.View)]
     public Task<IReadOnlyCollection<CertificationExamSessionDto>> Sessions([FromQuery] Guid? cohortId, CancellationToken ct) => mediator.Send(new GetCertificationExamSessionsQuery(cohortId.HasValue ? new CohortId(cohortId.Value) : null), ct);
+    // Jury-only read endpoints: handlers enforce active tenant membership and
+    // persisted assignment, rather than a browser-selected cohort.
+    [HttpGet("jury/sessions")]
+    [HasPermission(PedagoraPilotPermissionCodes.Jury.Evaluate)]
+    public Task<IReadOnlyCollection<CertificationExamSessionDto>> MyJurySessions(CancellationToken ct) =>
+        mediator.Send(new GetCertificationExamSessionsQuery(null), ct);
+
+    [HttpGet("jury/schemes")]
+    [HasPermission(PedagoraPilotPermissionCodes.Jury.Evaluate)]
+    public Task<IReadOnlyCollection<CertificationSchemeDto>> MyJurySchemes(CancellationToken ct) =>
+        mediator.Send(new GetCertificationSchemesQuery(null), ct);
+
+    [HttpGet("jury/sessions/{id:guid}/candidates")]
+    [HasPermission(PedagoraPilotPermissionCodes.Jury.Evaluate)]
+    public Task<IReadOnlyCollection<CertificationCandidateDto>> MyJuryCandidates(Guid id, CancellationToken ct) =>
+        mediator.Send(new GetCertificationCandidatesQuery(new CertificationExamSessionId(id)), ct);
+
     [HttpPost("sessions")]
     [HasPermission(PedagoraPilotPermissionCodes.Certification.Manage)]
     public Task<CertificationExamSessionDto> Create(CreateCertificationExamSessionRequest r, CancellationToken ct) => mediator.Send(new CreateCertificationExamSessionCommand(new CohortId(r.CohortId), new CertificationSchemeId(r.SchemeId), r.Title, r.StartsAtUtc, r.EndsAtUtc, r.Venue), ct);

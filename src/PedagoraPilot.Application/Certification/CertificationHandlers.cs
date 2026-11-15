@@ -24,13 +24,29 @@ internal static class CertMap
 
 public sealed class GetCertificationSchemesQueryHandler(ICertificationSchemeRepository repo, ICurrentUser current,
     IReferentialVersionRepository versions, IReferentialRepository referentials,
-    IProgramOfferingRepository offerings, ITrainingSiteRepository sites) : IRequestHandler<GetCertificationSchemesQuery, IReadOnlyCollection<CertificationSchemeDto>>
+    IProgramOfferingRepository offerings, ITrainingSiteRepository sites,
+    ICertificationExamSessionRepository examSessions, IJuryAssignmentRepository juries) : IRequestHandler<GetCertificationSchemesQuery, IReadOnlyCollection<CertificationSchemeDto>>
 {
     public async Task<IReadOnlyCollection<CertificationSchemeDto>> Handle(GetCertificationSchemesQuery r, CancellationToken ct)
     {
         var q = repo.Query(false).Include(x => x.Units).Include(x => x.Steps).AsQueryable();
         var organizationId = TenantScope.Organization(current);
-        if (organizationId.HasValue)
+        if (CertificationActorAccess.HasJuryCapability(current)
+            && !current.HasPermission(PedagoraPilotPermissionCodes.Certification.Manage))
+        {
+            if (!current.UserId.HasValue || !organizationId.HasValue) return Array.Empty<CertificationSchemeDto>();
+            var assignmentSessionIds = await juries.Query(false)
+                .Where(x => x.OrganizationId == organizationId.Value && x.AuthGateUserId == current.UserId.Value)
+                .Select(x => x.ExamSessionId).ToArrayAsync(ct);
+            var assignedSessions = await examSessions.Query(false)
+                .Where(x => x.OrganizationId == organizationId.Value && assignmentSessionIds.Contains(x.Id))
+                .ToListAsync(ct);
+            // Scheme access is narrowed to assigned sessions; evaluation access is
+            // independently checked against the configured window by its handler.
+            var ids = assignedSessions.Select(x => x.SchemeId).Distinct().ToArray();
+            q = q.Where(x => ids.Contains(x.Id));
+        }
+        else if (organizationId.HasValue)
         {
             var candidates = await (from version in versions.Query(false)
                                     join referential in referentials.Query(false) on version.ReferentialId equals referential.Id
@@ -62,10 +78,15 @@ public sealed class GetCertificationExamSessionsQueryHandler(ICertificationExamS
         if (r.CohortId.HasValue)
             q = q.Where(x => x.CohortId == r.CohortId.Value);
         var rows = await q.OrderByDescending(x => x.StartsAtUtc).ToListAsync(ct);
-        rows = await CertificationContextualAccess.FilterSessionsAsync(rows, cohorts, offerings, current, ct);
-        if (CertificationActorAccess.HasJuryCapability(current) && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Certification.Manage))
+        // For a jury-only principal, the persisted assignment is the access scope.
+        // Do not filter by a previously selected training cohort before applying it.
+        var juryOnly = CertificationActorAccess.HasJuryCapability(current)
+            && !current.HasPermission(PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Certification.Manage);
+        if (!juryOnly)
+            rows = await CertificationContextualAccess.FilterSessionsAsync(rows, cohorts, offerings, current, ct);
+        if (juryOnly)
         {
-            if (!current.UserId.HasValue) return Array.Empty<CertificationExamSessionDto>();
+            if (!current.UserId.HasValue || !organizationId.HasValue) return Array.Empty<CertificationExamSessionDto>();
             var assignedIds = await juries.Query(false)
                 .Where(x => x.OrganizationId == current.OrganizationId && x.AuthGateUserId == current.UserId.Value)
                 .Select(x => x.ExamSessionId)
@@ -125,8 +146,12 @@ public sealed class GetCertificationCandidatesQueryHandler(
     {
         var session = await sessions.GetByIdAsync(r.SessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
         TenantScope.Ensure(current, session.OrganizationId);
-        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: false, ct);
-        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, new JuryAccessWindowPolicy(configuration), ct);
+        if (CertificationActorAccess.HasJuryCapability(current)
+            && !current.HasPermission(PedagoraPilotPermissionCodes.Certification.Manage))
+            await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current,
+                new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
+        else
+            await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: false, ct);
         var q = repo.Query(false).Include(x => x.Assessments).Where(x => x.ExamSessionId == r.SessionId).AsQueryable();
         var organizationId = TenantScope.Organization(current);
         if (organizationId.HasValue)
@@ -288,8 +313,13 @@ public sealed class RecordCertificationAssessmentCommandHandler(ICertificationCa
         var x = await candidates.Query(true).Include(a => a.Assessments).SingleOrDefaultAsync(a => a.Id == r.CandidateId, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationCandidateNotFound);
         TenantScope.Ensure(current, x.OrganizationId);
         var session = await sessions.GetByIdAsync(x.ExamSessionId, false, ct) ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
-        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
-        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
+        // A jury can assess only during its persisted assignment window, independently
+        // of the user's selected training cohort. Direction retains contextual checks.
+        if (!CertificationActorAccess.HasJuryCapability(current)
+            || current.HasPermission(PedagoraPilotPermissionCodes.Certification.Manage))
+            await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current,
+            new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
         // Recording marks/assessments is only legitimate while the exam is running.
         if (session.Status != CertificationExamSessionStatus.InProgress)
             throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
@@ -322,8 +352,13 @@ public sealed class RecordCertificationAssessmentBatchCommandHandler(
         TenantScope.Ensure(current, candidate.OrganizationId);
         var session = await sessions.GetByIdAsync(candidate.ExamSessionId, false, ct)
             ?? throw new NotFoundApplicationException(ErrorKeys.CertificationSessionNotFound);
-        await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
-        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current, new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
+        // A jury can assess only during its persisted assignment window, independently
+        // of the user's selected training cohort. Direction retains contextual checks.
+        if (!CertificationActorAccess.HasJuryCapability(current)
+            || current.HasPermission(PedagoraPilotPermissionCodes.Certification.Manage))
+            await CertificationContextualAccess.EnsureSessionAsync(session, cohorts, offerings, current, manage: true, ct);
+        await CertificationActorAccess.EnsureJuryAssignmentIfRequiredAsync(session, juries, current,
+            new JuryAccessWindowPolicy(configuration), ct, requireJuryAuthorization: true);
         if (session.Status != CertificationExamSessionStatus.InProgress)
             throw new ConflictApplicationException(ErrorKeys.CertificationSessionNotWritable);
         var scheme = await schemes.Query(false).Include(x => x.Steps)
