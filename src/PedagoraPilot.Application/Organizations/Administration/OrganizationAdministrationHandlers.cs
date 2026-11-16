@@ -88,6 +88,8 @@ public sealed class UpdateOrganizationAdministrationCommandHandler(
         // EF Core also checks Organization.Version when committing concurrent transactions.
         if (r.ExpectedVersion is null || r.ExpectedVersion.Value != organization.Version)
             throw new ConflictApplicationException(ErrorKeys.ConcurrencyConflict);
+        if (string.IsNullOrWhiteSpace(r.LegalName))
+            throw new ValidationApplicationException("ORGANIZATION_LEGAL_NAME_REQUIRED");
         organization.UpdateAdministration(
             r.LegalName, r.ShortName, r.Siret, r.TrainingDeclarationNumber, r.Address, r.PostalCode,
             r.City, r.Country, r.Email, r.Phone, r.Website, r.ManagerName,

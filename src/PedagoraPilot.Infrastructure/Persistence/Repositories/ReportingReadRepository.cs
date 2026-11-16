@@ -246,21 +246,18 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
                     Rework = g.Count(x => x.Status == TopicProgressStatus.Rework)
                 });
 
-        var competencyRows = await db.LearnerCompetencyRecords.AsNoTracking()
-            .Where(x => enrollmentIds.Contains(x.EnrollmentId))
-            .Join(db.CompetencyDefinitions.AsNoTracking().Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId),
-                record => record.CompetencyDefinitionId,
-                definition => definition.Id,
-                (record, definition) => new
-                {
-                    record.EnrollmentId,
-                    record.Score,
-                    definition.Code,
-                    definition.ParentId
-                })
+        // All active criteria of the cohort's referential are the denominator.
+        // Scores are optional in evaluations: criterion levels are the source of truth.
+        var definitions = await db.CompetencyDefinitions.AsNoTracking()
+            .Where(x => x.ReferentialVersionId == cohort.ReferentialVersionId && x.Active)
+            .Select(x => new { x.Id, x.ParentId, x.Code })
             .ToListAsync(ct);
-
+        var competencyRows = await db.LearnerCompetencyRecords.AsNoTracking()
+            .Where(x => enrollmentIds.Contains(x.EnrollmentId) && x.OrganizationId == cohort.OrganizationId)
+            .Select(x => new { x.EnrollmentId, x.CompetencyDefinitionId, x.Level, x.Score })
+            .ToListAsync(ct);
         var competencyByEnrollment = competencyRows.ToLookup(x => x.EnrollmentId);
+        var roots = definitions.Where(x => x.ParentId is null).ToArray();
 
         return enrollmentRows
             .OrderBy(x => x.LastName)
@@ -269,21 +266,29 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
             {
                 attendance.TryGetValue(row.Id, out var hours);
                 topics.TryGetValue(row.Id, out var sheetStats);
-                var competencyRowsForLearner = competencyByEnrollment[row.Id];
-
-                var scored = competencyRowsForLearner
-                    .Where(x => x.Score.HasValue)
-                    .Select(x => x.Score!.Value)
-                    .ToArray();
-                var progress = scored.Length == 0 ? 0m : Math.Round(scored.Average(), 2);
-
-                var competencies = competencyRowsForLearner
-                    .Where(x => x.ParentId is null && !string.IsNullOrWhiteSpace(x.Code))
-                    .GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(
-                        g => g.Key.ToUpperInvariant(),
-                        g => g.Where(x => x.Score.HasValue).Select(x => x.Score!.Value).DefaultIfEmpty(0m).Average(),
-                        StringComparer.OrdinalIgnoreCase);
+                var records = competencyByEnrollment[row.Id].ToDictionary(x => x.CompetencyDefinitionId);
+                var competencies = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+                foreach (var root in roots)
+                {
+                    var children = definitions.Where(x => x.ParentId == root.Id).ToArray();
+                    decimal value;
+                    if (children.Length > 0)
+                    {
+                        // A missing assessment is zero, rather than removed from the denominator.
+                        value = Math.Round(children.Average(child =>
+                            records.TryGetValue(child.Id, out var r)
+                                ? CompetencyProgress(r.Level, r.Score) : 0m), 2);
+                    }
+                    else
+                    {
+                        value = records.TryGetValue(root.Id, out var r)
+                            ? CompetencyProgress(r.Level, r.Score) : 0m;
+                    }
+                    if (!string.IsNullOrWhiteSpace(root.Code))
+                        competencies[root.Code.ToUpperInvariant()] = value;
+                }
+                var progress = competencies.Count == 0 ? 0m
+                    : Math.Round(competencies.Values.Average(), 2);
 
                 var workplace = workplaceMinutes.GetValueOrDefault(row.Id, 0);
                 var internship = workplace > 0 ? workplace : hours?.InternshipSession ?? 0;
@@ -514,10 +519,11 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
                     child.Code ?? string.Empty,
                     child.Title ?? string.Empty,
                     NormalizeCompetencyLevel(record?.Level),
-                    record?.Score ?? 0m);
+                    record is null ? 0m : CompetencyProgress(record.Level, record.Score));
             }).ToArray();
-            var childScores = criterionDtos.Where(x => x.Score > 0m).Select(x => x.Score).ToArray();
-            var progress = rootRecord?.Score ?? (childScores.Length == 0 ? 0m : Math.Round(childScores.Average(), 2));
+            var progress = children.Length > 0
+                ? Math.Round(criterionDtos.Average(x => x.Score), 2)
+                : rootRecord is null ? 0m : CompetencyProgress(rootRecord.Level, rootRecord.Score);
             return new LearnerSkillDetailDto(root.Id.Value, root.Code ?? string.Empty, root.Title ?? string.Empty, progress, criterionDtos);
         }).ToArray();
 
@@ -1007,6 +1013,14 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
         }).ToArray();
     }
 
+    private static decimal CompetencyProgress(CompetencyLevel level, decimal? score) => level switch
+    {
+        CompetencyLevel.Acquired => 100m,
+        CompetencyLevel.InProgress => 60m,
+        CompetencyLevel.Rework => 25m,
+        _ => 0m
+    };
+
     private static string NormalizeCompetencyLevel(CompetencyLevel? level) => level switch
     {
         CompetencyLevel.Acquired => "acquired",
@@ -1102,11 +1116,13 @@ public sealed class ReportingReadRepository(PedagoraPilotDbContext db) : IReport
         if (enrollmentIds.Count == 0)
             return 0m;
 
-        var scores = await db.LearnerCompetencyRecords.AsNoTracking()
-            .Where(x => enrollmentIds.Contains(x.EnrollmentId) && x.Score.HasValue)
-            .Select(x => x.Score!.Value)
-            .ToListAsync(ct);
-        return scores.Count == 0 ? 0m : Math.Round(scores.Average(), 2);
+        var cohortProgress = new List<decimal>();
+        foreach (var cohortId in cohortIds)
+        {
+            var learners = await GetCohortLearnerDashboardsAsync(cohortId.Value, organizationId, ct);
+            cohortProgress.AddRange(learners.Select(x => x.AverageCompetencyProgress));
+        }
+        return cohortProgress.Count == 0 ? 0m : Math.Round(cohortProgress.Average(), 2);
     }
 
     private async Task<decimal> CertificationSuccessAsync(
