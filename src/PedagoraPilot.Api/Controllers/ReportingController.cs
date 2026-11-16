@@ -13,12 +13,19 @@ namespace PedagoraPilot.Api.Controllers;
 public sealed class ReportingController(IMediator mediator) : ControllerBase
 {
     [HttpGet("organizations/{organizationId:guid}/dashboard")]
+    [StatisticsModuleGuard]
     [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
     public async Task<ActionResult<OrganizationDashboardDto>> OrganizationDashboard(Guid organizationId, CancellationToken ct) => Ok(await mediator.Send(new GetOrganizationDashboardQuery(organizationId), ct));
+    [HttpGet("organizations/{organizationId:guid}/modules/statistics/status")]
+    [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
+    [StatisticsModuleGuard]
+    public IActionResult StatisticsStatus(Guid organizationId) => Ok(new { enabled = true });
     [HttpGet("sites/{siteId:guid}/dashboard")]
+    [StatisticsModuleGuard]
     [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
     public async Task<ActionResult<SiteDashboardDto>> SiteDashboard(Guid siteId, CancellationToken ct) => Ok(await mediator.Send(new GetSiteDashboardQuery(siteId), ct));
     [HttpGet("cohorts/{cohortId:guid}/dashboard")]
+    [StatisticsModuleGuard]
     [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
     public async Task<ActionResult<CohortDashboardDto>> CohortDashboard(Guid cohortId, CancellationToken ct) => Ok(await mediator.Send(new GetCohortDashboardQuery(cohortId), ct));
     [HttpGet("cohorts/{cohortId:guid}/learners")]
@@ -38,6 +45,7 @@ public sealed class ReportingController(IMediator mediator) : ControllerBase
     [HasPermission(PedagoraPilotPermissionCodes.Certification.View)]
     public async Task<ActionResult<IReadOnlyCollection<CertificationSuccessRecordDto>>> CertificationSuccess(Guid organizationId, CancellationToken ct) => Ok(await mediator.Send(new GetCertificationSuccessQuery(organizationId), ct));
     [HttpGet("cohorts/{cohortId:guid}/attendance-trend")]
+    [StatisticsModuleGuard]
     [HasPermission(PedagoraPilotPermissionCodes.Statistics.View)]
     public async Task<ActionResult<IReadOnlyCollection<ReportingTrendPointDto>>> AttendanceTrend(Guid cohortId, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct) => Ok(await mediator.Send(new GetAttendanceTrendQuery(cohortId, from, to), ct));
     [HttpGet("audit")]
