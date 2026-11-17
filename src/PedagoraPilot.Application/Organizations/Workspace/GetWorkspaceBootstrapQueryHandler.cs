@@ -21,6 +21,8 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
     IReferentialVersionRepository versions,
     ICohortRepository cohorts,
     IEnrollmentRepository enrollments,
+    ILearnerProfileRepository learnerProfiles,
+    IPersonRepository people,
     IObjectMapper mapper,
     ICurrentUser currentUser)
     : IRequestHandler<GetWorkspaceBootstrapQuery, WorkspaceBootstrapDto>
@@ -115,6 +117,39 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
                 && currentUser.CanViewCohort(x.SiteId, programId, x.Id.Value)).ToList();
         }
 
+        // A student may belong to an organization containing many cohorts. Membership
+        // in that organization does NOT imply an enrollment in any arbitrary cohort.
+        // Restore and expose only cohorts backed by their own enrollment records.
+        PedagoraPilot.Domain.Training.Enrollment? learnerDefaultEnrollment = null;
+        if (PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(currentUser))
+        {
+            var self = await PedagoraPilot.Application.Training.Learners.LearnerSelfAccess
+                .ResolveProfileAsync(learnerProfiles, people, currentUser, ct);
+            if (self is null)
+            {
+                cc = [];
+            }
+            else
+            {
+                var visibleCohortIds = cc.Select(x => x.Id).ToArray();
+                // Query a single learner first. Comparing strongly typed CohortId
+                // values in an EF Contains expression is provider-dependent;
+                // filter the already-scoped learner records in memory.
+                var ownEnrollments = (await enrollments.Query(false)
+                    .Where(x => x.LearnerProfileId == self.Id)
+                    .ToListAsync(ct))
+                    .Where(x => visibleCohortIds.Contains(x.CohortId)
+                        && x.Status != PedagoraPilot.Domain.Training.EnrollmentStatus.Withdrawn
+                        && x.Status != PedagoraPilot.Domain.Training.EnrollmentStatus.Cancelled)
+                    .OrderByDescending(x => x.Status == PedagoraPilot.Domain.Training.EnrollmentStatus.Active)
+                    .ThenByDescending(x => x.EnrolledOn)
+                    .ToList();
+                var enrolledCohortIds = ownEnrollments.Select(x => x.CohortId).ToHashSet();
+                cc = cc.Where(x => enrolledCohortIds.Contains(x.Id)).ToList();
+                learnerDefaultEnrollment = ownEnrollments.FirstOrDefault();
+            }
+        }
+
         var orgDtos = orgs.Select(x =>
             new WorkspaceOrganizationDto(
                 x.Id,
@@ -199,9 +234,20 @@ public sealed class GetWorkspaceBootstrapQueryHandler(
         var firstOffer = firstSite is null
             ? null
             : oo.FirstOrDefault(x => x.SiteId == firstSite.Id);
-        var firstCohort = firstOffer is null
-            ? null
-            : cc.FirstOrDefault(x => x.ProgramOfferingId == firstOffer.Id);
+        var firstCohort = learnerDefaultEnrollment is not null
+            ? cc.FirstOrDefault(x => x.Id == learnerDefaultEnrollment.CohortId)
+            : firstOffer is null ? null : cc.FirstOrDefault(x => x.ProgramOfferingId == firstOffer.Id);
+        if (PedagoraPilot.Application.Training.Learners.LearnerSelfAccess.Applies(currentUser)
+            && learnerDefaultEnrollment is null)
+        {
+            firstCohort = null;
+        }
+        if (learnerDefaultEnrollment is not null && firstCohort is not null)
+        {
+            firstOffer = oo.FirstOrDefault(x => x.Id == firstCohort.ProgramOfferingId);
+            firstSite = firstOffer is null ? null : ss.FirstOrDefault(x => x.Id == firstOffer.SiteId);
+            firstOrg = firstSite is null ? null : orgs.FirstOrDefault(x => x.Id == firstSite.OrganizationId);
+        }
 
         return new WorkspaceBootstrapDto(
             orgDtos,
