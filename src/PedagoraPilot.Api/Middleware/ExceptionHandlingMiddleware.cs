@@ -29,6 +29,9 @@ public sealed class ExceptionHandlingMiddleware
             var underlying = UnwrapDomainRelay(exception);
             switch (underlying)
             {
+                case OperationCanceledException when context.RequestAborted.IsCancellationRequested:
+                    _logger.LogDebug("Client disconnected; canceled DomainRelay request. TraceId={TraceId}", context.TraceIdentifier);
+                    break;
                 case ApplicationExceptionBase application:
                     _logger.LogWarning("Request rejected by application rule {ErrorKey}. TraceId={TraceId}",
                         application.ErrorKey, context.TraceIdentifier);
@@ -58,6 +61,10 @@ public sealed class ExceptionHandlingMiddleware
                     await WriteAsync(context, StatusCodes.Status500InternalServerError, ErrorKeys.Unexpected);
                     break;
             }
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogDebug("Client disconnected; canceled request. TraceId={TraceId}", context.TraceIdentifier);
         }
         catch (ValidationException exception)
         {
