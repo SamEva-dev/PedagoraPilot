@@ -92,6 +92,7 @@ public sealed class CreateTrainingSessionCommandHandler(ICohortRepository cohort
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
         await ValidateParticipantsAsync(cohort.Id, audienceMode, participantIds, enrollments, ct);
         var trainer = await VerifiedTrainerAsync(currentUser, request.TrainerAuthGateUserId, request.TrainerDisplayName, members, cohort.OrganizationId, PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.AssignTrainer, ct);
+        await TrainingSessionScheduleGuard.EnsureTrainerAvailableAsync(sessions, cohort.OrganizationId, trainer.Id, request.StartsAtUtc, request.EndsAtUtc, null, ct);
         var entity = TrainingSession.Create(cohort.OrganizationId, cohort.SiteId, cohort.Id, TrainingDeliveryMapper.ParseType(request.Type), TrainingDeliveryMapper.ParseModality(request.Modality), request.Title, request.StartsAtUtc, request.EndsAtUtc, request.TimeZoneId, trainer.Id, trainer.Name, request.Location, request.Objective, request.Supports, request.Comments, audienceMode, participantIds, request.ExternalKey);
         await sessions.AddAsync(entity, ct);
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(cohort.Id, ct);
@@ -222,6 +223,7 @@ public sealed class UpdateTrainingSessionCommandHandler(ITrainingSessionReposito
         var participantIds = (request.ParticipantEnrollmentIds ?? Array.Empty<Guid>()).Select(x => new EnrollmentId(x)).ToArray();
         await CreateTrainingSessionCommandHandler.ValidateParticipantsAsync(entity.CohortId, audienceMode, participantIds, enrollments, ct);
         var trainer = await CreateTrainingSessionCommandHandler.VerifiedTrainerAsync(currentUser, request.TrainerAuthGateUserId, request.TrainerDisplayName, members, entity.OrganizationId, PedagoraPilot.Security.Contracts.PedagoraPilotPermissionCodes.Sessions.AssignTrainer, ct);
+        await TrainingSessionScheduleGuard.EnsureTrainerAvailableAsync(sessions, entity.OrganizationId, trainer.Id, request.StartsAtUtc, request.EndsAtUtc, entity.Id, ct);
         entity.Update(TrainingDeliveryMapper.ParseType(request.Type), TrainingDeliveryMapper.ParseModality(request.Modality), request.Title, request.StartsAtUtc, request.EndsAtUtc, request.TimeZoneId, trainer.Id, trainer.Name, request.Location, request.Objective, request.Supports, request.Comments, audienceMode, participantIds);
         var expected = entity.AudienceMode == SessionAudienceMode.SelectedEnrollments ? entity.Participants.Count : await enrollments.CountActiveByCohortAsync(entity.CohortId, ct);
         return TrainingDeliveryMapper.ToDto(entity, expected, 0, mapper);

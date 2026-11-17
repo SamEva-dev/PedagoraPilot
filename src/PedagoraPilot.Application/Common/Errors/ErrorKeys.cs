@@ -176,6 +176,7 @@ public static class ErrorKeys
     public const string DrivingSessionInvalid = "DRIVING_SESSION_INVALID";
     public const string DrivingCriteriaInvalid = "DRIVING_CRITERIA_INVALID";
     public const string SessionTrainerIdentityInvalid = "SESSION_TRAINER_IDENTITY_INVALID";
+    public const string SessionTrainerScheduleConflict = "SESSION_TRAINER_SCHEDULE_CONFLICT";
     public const string WorkplacePeriodNotFound = "WORKPLACE_PERIOD_NOT_FOUND";
     public const string WorkplaceForbidden = "WORKPLACE_FORBIDDEN";
     public const string WorkplacePeriodOverlap = "WORKPLACE_PERIOD_OVERLAP";
