@@ -1,6 +1,7 @@
 using Itech.Emailing.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using PedagoraPilot.Application.Abstractions.Identity;
 using PedagoraPilot.Application.Abstractions.Persistence;
 using PedagoraPilot.Application.Access.Invitations;
@@ -22,7 +23,8 @@ public sealed class AccessInvitationProcessor(
     PedagoraPilot.Infrastructure.Persistence.PedagoraPilotDbContext db,
     IIdempotentEmailingService emailing,
     IConfiguration configuration,
-    IHostEnvironment environment) : IAccessInvitationProcessor
+    IHostEnvironment environment,
+    ILogger<AccessInvitationProcessor> logger) : IAccessInvitationProcessor
 {
     public async Task ProcessCreatedAsync(Guid invitationId, string token, Guid eventId, CancellationToken ct = default)
     {
@@ -139,6 +141,7 @@ public sealed class AccessInvitationProcessor(
     {
         invitation.MarkProcessing();
         await unitOfWork.SaveChangesAsync(ct);
+        Guid? authGateProvisionedUserId = null;
         try
         {
             // A prior invitation can become impossible to honor when the cohort
@@ -160,6 +163,12 @@ public sealed class AccessInvitationProcessor(
             // even if the identity itself is valid. Do not consume this invitation.
             if (provisioned.UserId == Guid.Empty || !provisioned.AccessActive)
                 throw new UnauthorizedAccessException("ACCESS_APPLICATION_MEMBERSHIP_INACTIVE");
+
+            // AuthGate has already persisted an external access grant. If the product
+            // transaction fails later, retain a structured correlation trail for a
+            // read-only reconciliation. Never revoke here: Ensure is idempotent and
+            // can return an existing, legitimate membership.
+            authGateProvisionedUserId = provisioned.UserId;
 
             // Keep member, learner, enrollment and invitation acceptance in ONE local DB transaction.
             // AuthGate is an external system and cannot participate in that transaction.
@@ -208,6 +217,12 @@ public sealed class AccessInvitationProcessor(
         }
         catch (Exception ex)
         {
+            if (authGateProvisionedUserId.HasValue)
+            {
+                logger.LogError(ex,
+                    "QA39C_AUTHGATE_PRODUCT_DIVERGENCE: invitation={InvitationId} organization={OrganizationId} authGateUser={AuthGateUserId} role={RequestedRole}; product transaction did not finish. Reconcile before any access change.",
+                    invitation.Id.Value, invitation.OrganizationId, authGateProvisionedUserId.Value, invitation.RequestedRole);
+            }
             // A rolled-back transaction leaves EF entities tracked as if they had persisted.
             // Detach them before recording retry state, or SaveChanges could commit an enrollment
             // that failed the capacity/invitation transaction.
