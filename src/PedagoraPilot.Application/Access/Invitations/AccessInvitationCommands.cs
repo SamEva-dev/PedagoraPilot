@@ -7,6 +7,7 @@ using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Training;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Domain.Access;
+using PedagoraPilot.Application.Access.Members;
 using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Application.Access.Invitations;
@@ -39,7 +40,8 @@ public sealed class CreateAccessInvitationCommandHandler(
     IProgramOfferingRepository offerings,
     IPersonRepository persons,
     ILearnerProfileRepository learnerProfiles,
-    IEnrollmentRepository enrollments)
+    IEnrollmentRepository enrollments,
+    IStudentMemberProvisioner studentMembers)
     : IRequestHandler<CreateAccessInvitationCommand, CreateAccessInvitationResult>
 {
     public async Task<CreateAccessInvitationResult> Handle(CreateAccessInvitationCommand request, CancellationToken ct)
@@ -86,6 +88,9 @@ public sealed class CreateAccessInvitationCommandHandler(
             // complete enrollment lifecycle (including reinstatement) has its own command.
             if (string.Equals(role, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
             {
+                // Reject invitations that cannot be accepted before publishing their
+                // outbox event; otherwise the staging bypass provisions AuthGate first.
+                await studentMembers.ValidateInvitationCapacityAsync(organizationId, cohort.Id.Value, ct);
                 var person = await persons.GetByEmailAsync(email, false, ct);
                 if (person is not null)
                 {

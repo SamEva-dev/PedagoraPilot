@@ -141,6 +141,16 @@ public sealed class AccessInvitationProcessor(
         await unitOfWork.SaveChangesAsync(ct);
         try
         {
+            // A prior invitation can become impossible to honor when the cohort
+            // fills before acceptance. Check before calling AuthGate.EnsureAsync.
+            // The final enrollment still rechecks capacity under its DB row lock.
+            if (string.Equals(invitation.RequestedRole, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!invitation.CohortId.HasValue || invitation.CohortId.Value == Guid.Empty)
+                    throw new ValidationApplicationException("ACCESS_STUDENT_COHORT_REQUIRED");
+                await studentMembers.ValidateInvitationCapacityAsync(invitation.OrganizationId, invitation.CohortId.Value, ct);
+            }
+
             var provisioned = await identity.EnsureAsync(new EnsureApplicationIdentityRequest(
                 invitation.OrganizationId, invitation.Email, invitation.FirstName, invitation.LastName,
                 invitation.RequestedRole, password, emailConfirmed, expectedOidcSubject, ReactivateRevokedMembership: true), ct);

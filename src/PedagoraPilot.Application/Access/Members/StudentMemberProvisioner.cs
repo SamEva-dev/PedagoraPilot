@@ -13,6 +13,8 @@ namespace PedagoraPilot.Application.Access.Members;
 /// </summary>
 public interface IStudentMemberProvisioner
 {
+    // Read-only early guard. The enrollment transaction must still recheck under its row lock.
+    Task ValidateInvitationCapacityAsync(Guid organizationId, Guid cohortId, CancellationToken ct = default);
     Task<LearnerProfileId> EnsureAsync(Guid organizationId, Guid authGateUserId, string email, string firstName,
         string lastName, Guid? cohortId = null, string? phone = null, DateOnly? birthDate = null, DateOnly? enrolledOn = null, CancellationToken ct = default);
 }
@@ -23,6 +25,25 @@ public sealed class StudentMemberProvisioner(
     ICohortRepository cohorts,
     IEnrollmentRepository enrollments) : IStudentMemberProvisioner
 {
+    public async Task ValidateInvitationCapacityAsync(Guid organizationId, Guid cohortId, CancellationToken ct = default)
+    {
+        if (cohortId == Guid.Empty)
+            throw new ValidationApplicationException("ACCESS_STUDENT_COHORT_REQUIRED");
+
+        var cohort = await cohorts.GetByIdAsync(new CohortId(cohortId), false, ct)
+            ?? throw new NotFoundApplicationException(ErrorKeys.CohortNotFound);
+        if (cohort.OrganizationId != organizationId)
+            throw new ForbiddenApplicationException(ErrorKeys.Forbidden);
+        if (cohort.Status is CohortStatus.Completed or CohortStatus.Cancelled)
+            throw new ConflictApplicationException(ErrorKeys.CohortClosed);
+
+        // This prevents knowingly activating an AuthGate membership when the cohort
+        // is already full. It does not reserve a seat; EnsureAsync retains the final
+        // transactionally locked capacity check to handle concurrent enrollments.
+        if (await enrollments.CountSeatOccupyingByCohortAsync(cohort.Id, ct) >= cohort.Capacity)
+            throw new ConflictApplicationException(ErrorKeys.CohortCapacityReached);
+    }
+
     public async Task<LearnerProfileId> EnsureAsync(Guid organizationId, Guid authGateUserId, string email,
         string firstName, string lastName, Guid? cohortId = null, string? phone = null, DateOnly? birthDate = null, DateOnly? enrolledOn = null, CancellationToken ct = default)
     {
