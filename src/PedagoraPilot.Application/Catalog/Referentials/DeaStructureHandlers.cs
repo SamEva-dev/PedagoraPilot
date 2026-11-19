@@ -103,54 +103,83 @@ internal static class DeaStructureValidation
 {
     internal static void Validate(JsonElement root)
     {
-        if (root.ValueKind != JsonValueKind.Object) throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
-        // Verify shape and internally consistent references, not regulatory accreditation.
-        var blocks = ReadArray(root, "blocks", 5);
-        var competencies = ReadArray(root, "competencies", 11);
-        var modules = ReadArray(root, "modules", 10);
-        var stages = ReadArray(root, "stages", null);
-        var assessments = ReadArray(root, "assessmentByBlock", 5);
+        if (root.ValueKind != JsonValueKind.Object)
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+
+        // Draft authoring is progressive: an empty scaffold and partially completed
+        // sections must be persistable. This is NOT a regulatory publication check.
+        var blocks = ReadArray(root, "blocks", null).ToArray();
+        var competencies = ReadArray(root, "competencies", null).ToArray();
+        var modules = ReadArray(root, "modules", null).ToArray();
+        var stages = ReadArray(root, "stages", null).ToArray();
+        var assessments = ReadArray(root, "assessmentByBlock", null).ToArray();
+        if (blocks.Length > 5 || competencies.Length > 11 || modules.Length > 10 || assessments.Length > 5)
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         ValidateUniqueCodes(blocks);
         ValidateUniqueCodes(competencies);
         ValidateUniqueCodes(modules);
-        var blockCodes = blocks.Select(b => RequiredCode(b)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var assessmentsSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var blockCodes = blocks.Select(RequiredCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var competencyNumbers = new HashSet<int>();
+        foreach (var competency in competencies)
+        {
+            var number = GetInt(competency, "number");
+            if (number is < 1 or > 11 || !competencyNumbers.Add(number)
+                || !string.Equals(RequiredString(competency, "kind"), "Professional", StringComparison.OrdinalIgnoreCase))
+                throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+        }
+
+        var assignedNumbers = new HashSet<int>();
+        foreach (var block in blocks)
+        {
+            if (!block.TryGetProperty("competencyNumbers", out var refs) || refs.ValueKind != JsonValueKind.Array)
+                throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+            foreach (var reference in refs.EnumerateArray())
+            {
+                if (reference.ValueKind != JsonValueKind.Number || !reference.TryGetInt32(out var number)
+                    || !competencyNumbers.Contains(number) || !assignedNumbers.Add(number))
+                    throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+            }
+        }
+
+        var assessmentCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var assessment in assessments)
         {
-            var code = RequiredString(assessment, "block");
-            if (!blockCodes.Contains(code) || !assessmentsSeen.Add(code)
+            var block = RequiredString(assessment, "block");
+            if (!blockCodes.Contains(block) || !assessmentCodes.Add(block)
                 || !assessment.TryGetProperty("modes", out var modes) || modes.ValueKind != JsonValueKind.Array
                 || modes.GetArrayLength() == 0
                 || modes.EnumerateArray().Any(m => m.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(m.GetString())))
                 throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         }
-        var moduleNumbers = modules.Select(m => GetInt(m, "number")).ToArray();
-        if (moduleNumbers.Distinct().Count() != 10 || moduleNumbers.Min() != 1 || moduleNumbers.Max() != 10)
-            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
-        if (stages.Any(stage => GetInt(stage, "hours") == 0 || string.IsNullOrWhiteSpace(RequiredString(stage, "label"))))
-            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
-        if (GetInt(root, "totalHours") != 801 || GetInt(root, "instituteHours") != 556
-            || GetInt(root, "internshipHours") != 245)
-            throw new ConflictApplicationException("DEA_STRUCTURE_HOURS_INVALID");
-        var followUpHours = GetInt(root, "pedagogicalFollowupHours");
-        var moduleSum = modules.Sum(m => GetInt(m, "hours"));
-        var internshipSum = stages.Sum(m => GetInt(m, "hours"));
-        if (followUpHours != 3 || moduleSum + followUpHours != 556 || internshipSum != 245)
-            throw new ConflictApplicationException("DEA_STRUCTURE_HOURS_INVALID");
-        var numbers = competencies.Select(c => GetInt(c, "number")).ToArray();
-        if (competencies.Any(c => !string.Equals(RequiredString(c, "kind"), "Professional", StringComparison.OrdinalIgnoreCase)))
-            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
-        if (numbers.Distinct().Count() != 11 || numbers.Min() != 1 || numbers.Max() != 11)
-            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
-        var assigned = new List<int>();
-        foreach (var block in blocks)
+
+        var moduleNumbers = new HashSet<int>();
+        var moduleHours = 0;
+        foreach (var module in modules)
         {
-            if (!block.TryGetProperty("competencyNumbers", out var refs) || refs.ValueKind != JsonValueKind.Array)
+            var number = GetInt(module, "number");
+            var hours = GetInt(module, "hours");
+            if (number is < 1 or > 10 || hours == 0 || !moduleNumbers.Add(number))
                 throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
-            foreach (var n in refs.EnumerateArray())
-                assigned.Add(n.ValueKind == JsonValueKind.Number && n.TryGetInt32(out var value) ? value : -1);
+            moduleHours += hours;
         }
-        if (assigned.Count != 11 || assigned.Distinct().Count() != 11 || !assigned.Order().SequenceEqual(numbers.Order()))
+        var internshipHours = 0;
+        foreach (var stage in stages)
+        {
+            var hours = GetInt(stage, "hours");
+            if (hours == 0 || string.IsNullOrWhiteSpace(RequiredString(stage, "label")))
+                throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+            internshipHours += hours;
+        }
+
+        if (GetInt(root, "totalHours") != 801 || GetInt(root, "instituteHours") != 556
+            || GetInt(root, "internshipHours") != 245 || GetInt(root, "pedagogicalFollowupHours") != 3
+            || moduleHours > 553 || internshipHours > 245)
+            throw new ConflictApplicationException("DEA_STRUCTURE_HOURS_INVALID");
+        // Full-size sections must also respect their complete cumulative constraints.
+        if (modules.Length == 10 && moduleHours != 553)
+            throw new ConflictApplicationException("DEA_STRUCTURE_HOURS_INVALID");
+        if (blocks.Length == 5 && competencies.Length == 11 && assignedNumbers.Count != 11)
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
     }
     private static string RequiredCode(JsonElement row) => RequiredString(row, "code");
@@ -175,7 +204,7 @@ internal static class DeaStructureValidation
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         return number;
     }
-    private static void ValidateUniqueCodes(JsonElement.ArrayEnumerator rows)
+    private static void ValidateUniqueCodes(IEnumerable<JsonElement> rows)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
