@@ -74,7 +74,7 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
     internal static ReferentialVersionDto ToDto(ReferentialVersion v, Referential r, TrainingProgram p, IReadOnlyCollection<string>? capabilities = null) => new(v.Id, v.ExternalKey ?? v.Id.ToString(), r.Id, r.ProgramId, p.ExternalKey ?? p.Id.ToString(), r.Code, r.Name, v.VersionLabel, v.CertificationCode, v.Status.ToString().ToLowerInvariant(), v.EffectiveFrom, v.EffectiveTo, v.TotalHours, v.SheetCount, v.RequiredDocumentCount, capabilities ?? v.Capabilities, v.NotesKey);
 }
 
-public sealed class CreateReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<CreateReferentialVersionCommand, ReferentialVersionDto>
+public sealed class CreateReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramFamilyRepository families, ICompetencyDefinitionRepository competencies, ICurrentUser current) : IRequestHandler<CreateReferentialVersionCommand, ReferentialVersionDto>
 {
     public async Task<ReferentialVersionDto> Handle(CreateReferentialVersionCommand r, CancellationToken ct)
     {
@@ -89,6 +89,7 @@ public sealed class CreateReferentialVersionCommandHandler(IReferentialRepositor
         var v = ReferentialVersion.CreateDraft(r.ReferentialId, r.Version, r.CertificationCode, r.EffectiveFrom, r.TotalHours, r.SheetCount, r.RequiredDocumentCount, r.EnabledModules, r.NotesKey, r.ExternalKey);
         if (r.Publish)
         {
+            await DeaReferentialPublicationGuard.EnsureCanPublishAsync(p, v.Id, families, competencies, ct);
             var actives = await versions.Query(true)
                 .Where(x => x.ReferentialId == r.ReferentialId && x.Status == ReferentialVersionStatus.Active)
                 .ToListAsync(ct);
@@ -101,7 +102,7 @@ public sealed class CreateReferentialVersionCommandHandler(IReferentialRepositor
     }
 }
 
-public sealed class PublishReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<PublishReferentialVersionCommand, ReferentialVersionDto>
+public sealed class PublishReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramFamilyRepository families, ICompetencyDefinitionRepository competencies, ICurrentUser current) : IRequestHandler<PublishReferentialVersionCommand, ReferentialVersionDto>
 {
     public async Task<ReferentialVersionDto> Handle(PublishReferentialVersionCommand r, CancellationToken ct)
     {
@@ -112,6 +113,7 @@ public sealed class PublishReferentialVersionCommandHandler(IReferentialReposito
             TenantScope.Ensure(current, p.OrganizationId.Value);
         else
             TenantScope.RequirePlatform(current);
+        await DeaReferentialPublicationGuard.EnsureCanPublishAsync(p, v.Id, families, competencies, ct);
         var actives = await versions.Query(true).Where(x => x.ReferentialId == v.ReferentialId && x.Status == ReferentialVersionStatus.Active && x.Id != v.Id).ToListAsync(ct);
         foreach (var old in actives)
             old.Archive(v.EffectiveFrom.AddDays(-1));

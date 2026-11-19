@@ -39,7 +39,11 @@ public sealed class CreateProgramCommandHandler(
             0,
             0,
             p.Capabilities);
-        version.Publish(DateTime.UtcNow);
+        // QA41: une formation sanitaire ne doit pas publier automatiquement
+        // un référentiel vide. Le référentiel DEA sera alimenté et vérifié
+        // avant publication explicite par le responsable habilité.
+        if (!string.Equals(family.Code, "EMERGENCY_MEDICAL", StringComparison.OrdinalIgnoreCase))
+            version.Publish(DateTime.UtcNow);
         await versions.AddAsync(version, ct);
 
         return ProgramDtoFactory.Create(p, family.Code, [], ReferentialVersionText.Display(version));
@@ -76,7 +80,9 @@ public sealed class UpdateProgramCommandHandler(
             displayVersion = active is null ? null : ReferentialVersionText.Display(active);
             if (active is null || !ReferentialVersionText.Equals(active, versionLabel, certificationCode))
             {
-                if (active is not null)
+                // QA41: conserver la version active pendant la préparation
+                // de la nouvelle version DEA (éviter une rupture de service).
+                if (active is not null && !string.Equals(family.Code, "EMERGENCY_MEDICAL", StringComparison.OrdinalIgnoreCase))
                     active.Archive(DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1));
                 var next = ReferentialVersion.CreateDraft(
                     referential.Id,
@@ -87,7 +93,10 @@ public sealed class UpdateProgramCommandHandler(
                     0,
                     0,
                     p.Capabilities);
-                next.Publish(DateTime.UtcNow);
+                // QA41: une nouvelle version sanitaire reste en brouillon tant
+                // qu'elle n'a pas reçu sa structure et ses compétences.
+                if (!string.Equals(family.Code, "EMERGENCY_MEDICAL", StringComparison.OrdinalIgnoreCase))
+                    next.Publish(DateTime.UtcNow);
                 await versions.AddAsync(next, ct);
                 displayVersion = ReferentialVersionText.Display(next);
             }
@@ -157,7 +166,5 @@ internal static class ProgramDtoFactory
         "MOTORCYCLE" => "motorcycle",
         "HEAVY_VEHICLE" => "heavy-vehicle",
         "PASSENGER_TRANSPORT" => "passenger-transport",
-        "EMERGENCY_MEDICAL" => "ambulance",
-        "FIRST_AID" => "first-aid",
         _ => familyCode.ToLowerInvariant().Replace('_', '-')};
 }

@@ -52,6 +52,7 @@ public static class ErrorKeys
     public const string ProgramOfferingInactive = "PROGRAM_OFFERING_INACTIVE";
     public const string ProgramOfferingActiveCohorts = "PROGRAM_OFFERING_ACTIVE_COHORTS";
     public const string ReferentialVersionNotActive = "REFERENTIAL_VERSION_NOT_ACTIVE";
+    public const string DeaReferentialCompetenciesIncomplete = "DEA_REFERENTIAL_COMPETENCIES_INCOMPLETE";
     public const string CohortNotFound = "COHORT_NOT_FOUND";
     public const string CohortCodeAlreadyExists = "COHORT_CODE_ALREADY_EXISTS";
     public const string CohortStatusInvalid = "COHORT_STATUS_INVALID";
