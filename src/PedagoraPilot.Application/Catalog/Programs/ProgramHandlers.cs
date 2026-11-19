@@ -157,5 +157,7 @@ internal static class ProgramDtoFactory
         "MOTORCYCLE" => "motorcycle",
         "HEAVY_VEHICLE" => "heavy-vehicle",
         "PASSENGER_TRANSPORT" => "passenger-transport",
+        "EMERGENCY_MEDICAL" => "ambulance",
+        "FIRST_AID" => "first-aid",
         _ => familyCode.ToLowerInvariant().Replace('_', '-')};
 }
