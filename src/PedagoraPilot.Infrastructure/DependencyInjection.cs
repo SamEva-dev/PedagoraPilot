@@ -161,6 +161,7 @@ public static class DependencyInjection
         services.AddScoped<IProgramOfferingRepository, ProgramOfferingRepository>();
         services.AddScoped<IReferentialRepository, ReferentialRepository>();
         services.AddScoped<IReferentialVersionRepository, ReferentialVersionRepository>();
+        services.AddScoped<IDeaReferentialStructureRepository, DeaReferentialStructureRepository>();
         services.AddScoped<ICohortRepository, CohortRepository>();
         services.AddScoped<ICohortTrainerAssignmentRepository, CohortTrainerAssignmentRepository>();
         services.AddScoped<IUserBusinessAssignmentService, UserBusinessAssignmentService>();

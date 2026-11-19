@@ -36,6 +36,7 @@ public sealed class PedagoraPilotDbContext : DbContext
     public DbSet<ProgramOffering> ProgramOfferings => Set<ProgramOffering>();
     public DbSet<Referential> Referentials => Set<Referential>();
     public DbSet<ReferentialVersion> ReferentialVersions => Set<ReferentialVersion>();
+    public DbSet<DeaReferentialStructure> DeaReferentialStructures => Set<DeaReferentialStructure>();
     public DbSet<ProgramCapabilityRow> ProgramCapabilities => Set<ProgramCapabilityRow>();
     public DbSet<ReferentialVersionCapabilityRow> ReferentialVersionCapabilities => Set<ReferentialVersionCapabilityRow>();
     public DbSet<Cohort> Cohorts => Set<Cohort>();

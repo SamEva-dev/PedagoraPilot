@@ -622,6 +622,36 @@ namespace PedagoraPilot.Infrastructure.Persistence.Migrations.PedagoraPilot
                     b.ToTable("organization_brandings", "branding");
                 });
 
+            modelBuilder.Entity("PedagoraPilot.Domain.Catalog.DeaReferentialStructure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("content_json");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("ReferentialVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("referential_version_id");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReferentialVersionId")
+                        .IsUnique();
+
+                    b.ToTable("dea_referential_structures", "catalog");
+                });
+
             modelBuilder.Entity("PedagoraPilot.Domain.Catalog.ProgramFamily", b =>
                 {
                     b.Property<Guid>("Id")
