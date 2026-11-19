@@ -17,6 +17,13 @@ public sealed class DeaReferentialStructureController(IMediator mediator) : Cont
         var result = await mediator.Send(new GetDeaStructureQuery(versionId), ct);
         return result is null ? NotFound() : Ok(result);
     }
+    [HttpGet("api/v1/referential-versions/{versionId:guid}/dea-structure/sections/{section}")]
+    [HasPermission(PedagoraPilotPermissionCodes.Referentials.View)]
+    public async Task<ActionResult<DeaStructureSectionResult>> GetSection(Guid versionId, string section, CancellationToken ct)
+    {
+        var result = await mediator.Send(new GetDeaStructureSectionQuery(versionId, section), ct);
+        return result is null ? NotFound() : Ok(result);
+    }
     [HttpPut("api/v1/referential-versions/{versionId:guid}/dea-structure")]
     [HasPermission(PedagoraPilotPermissionCodes.Referentials.Manage)]
     public Task<DeaStructureResult> Put(Guid versionId, [FromBody] JsonElement content, CancellationToken ct)

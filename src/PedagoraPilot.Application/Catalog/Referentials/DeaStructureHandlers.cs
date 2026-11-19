@@ -11,6 +11,39 @@ namespace PedagoraPilot.Application.Catalog.Referentials;
 public sealed record DeaStructureResult(Guid ReferentialVersionId, JsonElement Content, DateTime UpdatedAtUtc);
 public sealed record GetDeaStructureQuery(Guid VersionId) : IQuery<DeaStructureResult?>;
 public sealed record SaveDeaStructureDraftCommand(Guid VersionId, JsonElement Content) : ICommand<DeaStructureResult>;
+/// <summary>Read-only section projection for DEA UI; structure remains the only source of truth.</summary>
+public sealed record DeaStructureSectionResult(Guid ReferentialVersionId, string Section, JsonElement Items, DateTime UpdatedAtUtc);
+public sealed record GetDeaStructureSectionQuery(Guid VersionId, string Section) : IQuery<DeaStructureSectionResult?>;
+public sealed class GetDeaStructureSectionQueryHandler(
+    IDeaReferentialStructureRepository structures, IReferentialVersionRepository versions,
+    IReferentialRepository referentials, IProgramOfferingRepository offerings,
+    ITrainingSiteRepository sites, ITrainingProgramRepository programs,
+    IProgramFamilyRepository families, ICurrentUser current)
+    : IRequestHandler<GetDeaStructureSectionQuery, DeaStructureSectionResult?>
+{
+    public async Task<DeaStructureSectionResult?> Handle(GetDeaStructureSectionQuery r, CancellationToken ct)
+    {
+        // Never load an arbitrary property name from a URL; allow only supported sections.
+        var section = r.Section.ToLowerInvariant() switch
+        {
+            "blocks" => "blocks",
+            "competencies" => "competencies",
+            "modules" => "modules",
+            "stages" => "stages",
+            "assessments" => "assessmentByBlock",
+            _ => throw new ConflictApplicationException("DEA_STRUCTURE_SECTION_INVALID")
+        };
+        await DeaStructureAccess.EnsureAsync(r.VersionId, versions, referentials, programs, families,
+            offerings, sites, current, false, ct);
+        var row = await structures.ByVersionAsync(r.VersionId, false, ct);
+        if (row is null) return null;
+        using var document = JsonDocument.Parse(row.ContentJson);
+        if (!document.RootElement.TryGetProperty(section, out var items) || items.ValueKind != JsonValueKind.Array)
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+        return new DeaStructureSectionResult(r.VersionId, r.Section.ToLowerInvariant(), items.Clone(), row.UpdatedAtUtc);
+    }
+}
+
 
 public sealed class GetDeaStructureQueryHandler(
     IDeaReferentialStructureRepository structures, IReferentialVersionRepository versions,
@@ -76,19 +109,37 @@ internal static class DeaStructureValidation
         var competencies = ReadArray(root, "competencies", 11);
         var modules = ReadArray(root, "modules", 10);
         var stages = ReadArray(root, "stages", null);
-        ReadArray(root, "assessmentByBlock", null);
+        var assessments = ReadArray(root, "assessmentByBlock", 5);
         ValidateUniqueCodes(blocks);
         ValidateUniqueCodes(competencies);
         ValidateUniqueCodes(modules);
+        var blockCodes = blocks.Select(b => RequiredCode(b)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var assessmentsSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var assessment in assessments)
+        {
+            var code = RequiredString(assessment, "block");
+            if (!blockCodes.Contains(code) || !assessmentsSeen.Add(code)
+                || !assessment.TryGetProperty("modes", out var modes) || modes.ValueKind != JsonValueKind.Array
+                || modes.GetArrayLength() == 0
+                || modes.EnumerateArray().Any(m => m.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(m.GetString())))
+                throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+        }
+        var moduleNumbers = modules.Select(m => GetInt(m, "number")).ToArray();
+        if (moduleNumbers.Distinct().Count() != 10 || moduleNumbers.Min() != 1 || moduleNumbers.Max() != 10)
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+        if (stages.Any(stage => GetInt(stage, "hours") == 0 || string.IsNullOrWhiteSpace(RequiredString(stage, "label"))))
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         if (GetInt(root, "totalHours") != 801 || GetInt(root, "instituteHours") != 556
             || GetInt(root, "internshipHours") != 245)
             throw new ConflictApplicationException("DEA_STRUCTURE_HOURS_INVALID");
         var followUpHours = GetInt(root, "pedagogicalFollowupHours");
         var moduleSum = modules.Sum(m => GetInt(m, "hours"));
         var internshipSum = stages.Sum(m => GetInt(m, "hours"));
-        if (moduleSum + followUpHours != 556 || internshipSum != 245)
+        if (followUpHours != 3 || moduleSum + followUpHours != 556 || internshipSum != 245)
             throw new ConflictApplicationException("DEA_STRUCTURE_HOURS_INVALID");
         var numbers = competencies.Select(c => GetInt(c, "number")).ToArray();
+        if (competencies.Any(c => !string.Equals(RequiredString(c, "kind"), "Professional", StringComparison.OrdinalIgnoreCase)))
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         if (numbers.Distinct().Count() != 11 || numbers.Min() != 1 || numbers.Max() != 11)
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         var assigned = new List<int>();
@@ -101,6 +152,14 @@ internal static class DeaStructureValidation
         }
         if (assigned.Count != 11 || assigned.Distinct().Count() != 11 || !assigned.Order().SequenceEqual(numbers.Order()))
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+    }
+    private static string RequiredCode(JsonElement row) => RequiredString(row, "code");
+    private static string RequiredString(JsonElement row, string property)
+    {
+        if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty(property, out var value)
+            || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+            throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+        return value.GetString()!;
     }
     private static JsonElement.ArrayEnumerator ReadArray(JsonElement root, string name, int? exact)
     {
