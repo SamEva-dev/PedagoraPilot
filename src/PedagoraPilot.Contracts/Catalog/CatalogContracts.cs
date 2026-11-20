@@ -39,7 +39,7 @@ public sealed record UpdateProgramRequest(
 }
 public sealed record ChangeProgramStatusRequest(string Status);
 public sealed record SetProgramOfferingRequest(bool Active);
-public sealed record ReferentialVersionDto(Guid Id, string Key, Guid ReferentialId, Guid ProgramId, string ProgramKey, string Code, string Name, string Version, string? CertificationCode, string Status, DateOnly EffectiveFrom, DateOnly? EffectiveTo, int TotalHours, int SheetCount, int RequiredDocumentCount, IReadOnlyCollection<string> EnabledModules, string? NotesKey);
+public sealed record ReferentialVersionDto(Guid Id, string Key, Guid ReferentialId, Guid ProgramId, string ProgramKey, string Code, string Name, string Version, string? CertificationCode, string Status, DateOnly EffectiveFrom, DateOnly? EffectiveTo, int TotalHours, int SheetCount, int RequiredDocumentCount, IReadOnlyCollection<string> EnabledModules, string? NotesKey, string? FamilyCode = null);
 public sealed record CreateReferentialVersionRequest(string Version, string? CertificationCode, DateOnly EffectiveFrom, int TotalHours, int SheetCount, int RequiredDocumentCount, IReadOnlyCollection<string> EnabledModules, string? NotesKey, string? ExternalKey, bool Publish = false);
 public sealed record ReferentialCompetencyDetailDto(Guid Id, Guid? ParentId, string Code, string Title, string Kind, int SortOrder);
 public sealed record ReferentialCertificationStepDetailDto(Guid Id, string Code, string Title, string Kind, int DurationMinutes, int SortOrder);

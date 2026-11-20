@@ -35,6 +35,7 @@ public sealed class TenantReferentialAccessRegressionTests(PostgresFixture fixtu
         db.ChangeTracker.Clear();
 
         var programs = new TrainingProgramRepository(db);
+        var families = new ProgramFamilyRepository(db);
         var versions = new ReferentialVersionRepository(db);
         var referentials = new ReferentialRepository(db);
         var offerings = new ProgramOfferingRepository(db);
@@ -43,12 +44,12 @@ public sealed class TenantReferentialAccessRegressionTests(PostgresFixture fixtu
         var otherTenant = new TestCurrentUser(Guid.NewGuid());
         var restrictedOwner = new TestCurrentUser(organizationId, restricted: true);
 
-        var listing = new GetReferentialsQueryHandler(referentials, versions, programs, offerings, sites, owner);
+        var listing = new GetReferentialsQueryHandler(referentials, versions, programs, families, offerings, sites, owner);
         var results = await listing.Handle(new GetReferentialsQuery(), CancellationToken.None);
         results.Should().ContainSingle(x => x.Id == version.Id);
         await TenantCatalogAccess.EnsureReferentialVersionAsync(owner, version.Id, versions, referentials, offerings, sites, programs, CancellationToken.None);
 
-        var restrictedListing = new GetReferentialsQueryHandler(referentials, versions, programs, offerings, sites, restrictedOwner);
+        var restrictedListing = new GetReferentialsQueryHandler(referentials, versions, programs, families, offerings, sites, restrictedOwner);
         (await restrictedListing.Handle(new GetReferentialsQuery(), CancellationToken.None)).Should().NotContain(x => x.Id == version.Id);
         Func<Task> restrictedRead = () => TenantCatalogAccess.EnsureReferentialVersionAsync(restrictedOwner, version.Id, versions, referentials, offerings, sites, programs, CancellationToken.None);
         await restrictedRead.Should().ThrowAsync<ForbiddenApplicationException>();
@@ -79,6 +80,7 @@ public sealed class TenantReferentialAccessRegressionTests(PostgresFixture fixtu
         db.ChangeTracker.Clear();
 
         var programs = new TrainingProgramRepository(db);
+        var families = new ProgramFamilyRepository(db);
         var versions = new ReferentialVersionRepository(db);
         var referentials = new ReferentialRepository(db);
         var offerings = new ProgramOfferingRepository(db);

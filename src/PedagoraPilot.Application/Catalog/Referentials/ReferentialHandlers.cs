@@ -9,7 +9,7 @@ using PedagoraPilot.Domain.Certification;
 
 namespace PedagoraPilot.Application.Catalog.Referentials;
 public sealed record GetReferentialsQuery(Guid? ProgramId = null, Guid? SiteId = null) : IRequest<IReadOnlyCollection<ReferentialVersionDto>>;
-public sealed class GetReferentialsQueryHandler(IReferentialRepository referentials, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ICurrentUser current) : IRequestHandler<GetReferentialsQuery, IReadOnlyCollection<ReferentialVersionDto>>
+public sealed class GetReferentialsQueryHandler(IReferentialRepository referentials, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramFamilyRepository families, IProgramOfferingRepository offerings, ITrainingSiteRepository sites, ICurrentUser current) : IRequestHandler<GetReferentialsQuery, IReadOnlyCollection<ReferentialVersionDto>>
 {
     public async Task<IReadOnlyCollection<ReferentialVersionDto>> Handle(GetReferentialsQuery q, CancellationToken ct)
     {
@@ -64,17 +64,26 @@ public sealed class GetReferentialsQueryHandler(IReferentialRepository referenti
         var caps = await versions.GetCapabilitiesAsync(vs.Select(x => x.Id), ct);
         var programIds = rs.Select(x => x.ProgramId).Distinct().ToArray();
         var ps = await programs.Query(false).Where(x => programIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        // The referential list already has a referentials.view permission boundary.
+        // Expose its family's public code here so ReadOnly does not need programs.view.
+        var familyIds = ps.Values.Select(x => x.FamilyId).Distinct().ToArray();
+        var familyCodes = await families.Query(false)
+            .Where(x => familyIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Code })
+            .ToDictionaryAsync(x => x.Id, x => x.Code, ct);
         return vs.Select(v =>
         {
             var referential = referentialsById[v.ReferentialId];
-            return ToDto(v, referential, ps[referential.ProgramId], caps.GetValueOrDefault(v.Id, Array.Empty<string>()));
+            var program = ps[referential.ProgramId];
+            return ToDto(v, referential, program, caps.GetValueOrDefault(v.Id, Array.Empty<string>()),
+                familyCodes.GetValueOrDefault(program.FamilyId));
         }).ToArray();
     }
 
-    internal static ReferentialVersionDto ToDto(ReferentialVersion v, Referential r, TrainingProgram p, IReadOnlyCollection<string>? capabilities = null) => new(v.Id, v.ExternalKey ?? v.Id.ToString(), r.Id, r.ProgramId, p.ExternalKey ?? p.Id.ToString(), r.Code, r.Name, v.VersionLabel, v.CertificationCode, v.Status.ToString().ToLowerInvariant(), v.EffectiveFrom, v.EffectiveTo, v.TotalHours, v.SheetCount, v.RequiredDocumentCount, capabilities ?? v.Capabilities, v.NotesKey);
+    internal static ReferentialVersionDto ToDto(ReferentialVersion v, Referential r, TrainingProgram p, IReadOnlyCollection<string>? capabilities = null, string? familyCode = null) => new(v.Id, v.ExternalKey ?? v.Id.ToString(), r.Id, r.ProgramId, p.ExternalKey ?? p.Id.ToString(), r.Code, r.Name, v.VersionLabel, v.CertificationCode, v.Status.ToString().ToLowerInvariant(), v.EffectiveFrom, v.EffectiveTo, v.TotalHours, v.SheetCount, v.RequiredDocumentCount, capabilities ?? v.Capabilities, v.NotesKey, familyCode);
 }
 
-public sealed class CreateReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramFamilyRepository families, ICompetencyDefinitionRepository competencies, ICurrentUser current) : IRequestHandler<CreateReferentialVersionCommand, ReferentialVersionDto>
+public sealed class CreateReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<CreateReferentialVersionCommand, ReferentialVersionDto>
 {
     public async Task<ReferentialVersionDto> Handle(CreateReferentialVersionCommand r, CancellationToken ct)
     {
@@ -89,7 +98,6 @@ public sealed class CreateReferentialVersionCommandHandler(IReferentialRepositor
         var v = ReferentialVersion.CreateDraft(r.ReferentialId, r.Version, r.CertificationCode, r.EffectiveFrom, r.TotalHours, r.SheetCount, r.RequiredDocumentCount, r.EnabledModules, r.NotesKey, r.ExternalKey);
         if (r.Publish)
         {
-            await DeaReferentialPublicationGuard.EnsureCanPublishAsync(p, v.Id, families, competencies, ct);
             var actives = await versions.Query(true)
                 .Where(x => x.ReferentialId == r.ReferentialId && x.Status == ReferentialVersionStatus.Active)
                 .ToListAsync(ct);
@@ -102,7 +110,7 @@ public sealed class CreateReferentialVersionCommandHandler(IReferentialRepositor
     }
 }
 
-public sealed class PublishReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, IProgramFamilyRepository families, ICompetencyDefinitionRepository competencies, ICurrentUser current) : IRequestHandler<PublishReferentialVersionCommand, ReferentialVersionDto>
+public sealed class PublishReferentialVersionCommandHandler(IReferentialRepository refs, IReferentialVersionRepository versions, ITrainingProgramRepository programs, ICurrentUser current) : IRequestHandler<PublishReferentialVersionCommand, ReferentialVersionDto>
 {
     public async Task<ReferentialVersionDto> Handle(PublishReferentialVersionCommand r, CancellationToken ct)
     {
@@ -113,7 +121,6 @@ public sealed class PublishReferentialVersionCommandHandler(IReferentialReposito
             TenantScope.Ensure(current, p.OrganizationId.Value);
         else
             TenantScope.RequirePlatform(current);
-        await DeaReferentialPublicationGuard.EnsureCanPublishAsync(p, v.Id, families, competencies, ct);
         var actives = await versions.Query(true).Where(x => x.ReferentialId == v.ReferentialId && x.Status == ReferentialVersionStatus.Active && x.Id != v.Id).ToListAsync(ct);
         foreach (var old in actives)
             old.Archive(v.EffectiveFrom.AddDays(-1));
