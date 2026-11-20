@@ -158,7 +158,7 @@ internal static class DeaStructureValidation
         foreach (var module in modules)
         {
             var number = GetInt(module, "number");
-            var hours = GetInt(module, "hours");
+            var hours = GetRequiredModuleHours(module);
             if (number is < 1 or > 10 || hours == 0 || !moduleNumbers.Add(number))
                 throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
             moduleHours += hours;
@@ -182,6 +182,19 @@ internal static class DeaStructureValidation
         if (blocks.Length == 5 && competencies.Length == 11 && assignedNumbers.Count != 11)
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
     }
+    // Keep the existing generic error for cross-section validation, but return a
+    // field-specific code for missing, non-numeric, zero or negative module hours.
+    private static int GetRequiredModuleHours(JsonElement module)
+    {
+        if (module.ValueKind != JsonValueKind.Object
+            || !module.TryGetProperty("hours", out var value)
+            || value.ValueKind != JsonValueKind.Number
+            || !value.TryGetInt32(out var hours)
+            || hours <= 0)
+            throw new ConflictApplicationException("DEA_STRUCTURE_MODULE_HOURS_REQUIRED");
+        return hours;
+    }
+
     private static string RequiredCode(JsonElement row) => RequiredString(row, "code");
     private static string RequiredString(JsonElement row, string property)
     {
