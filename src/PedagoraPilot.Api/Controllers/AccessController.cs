@@ -413,6 +413,7 @@ public sealed class AccessController(
             ["student"] = PedagoraPilotRoleCodes.Student,
             ["jury"] = PedagoraPilotRoleCodes.Jury,
             ["read_only"] = PedagoraPilotRoleCodes.ReadOnly,
+            ["readonly"] = PedagoraPilotRoleCodes.ReadOnly,
             ["direction"] = PedagoraPilotRoleCodes.OrganizationDirection,
             ["formateur"] = PedagoraPilotRoleCodes.Trainer,
             ["stagiaire"] = PedagoraPilotRoleCodes.Student

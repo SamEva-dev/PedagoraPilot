@@ -7,7 +7,6 @@ using PedagoraPilot.Domain.Identifiers;
 using PedagoraPilot.Domain.Training;
 using PedagoraPilot.Application.Abstractions.Security;
 using PedagoraPilot.Domain.Access;
-using PedagoraPilot.Application.Access.Members;
 using PedagoraPilot.Security.Contracts;
 
 namespace PedagoraPilot.Application.Access.Invitations;
@@ -40,8 +39,7 @@ public sealed class CreateAccessInvitationCommandHandler(
     IProgramOfferingRepository offerings,
     IPersonRepository persons,
     ILearnerProfileRepository learnerProfiles,
-    IEnrollmentRepository enrollments,
-    IStudentMemberProvisioner studentMembers)
+    IEnrollmentRepository enrollments)
     : IRequestHandler<CreateAccessInvitationCommand, CreateAccessInvitationResult>
 {
     public async Task<CreateAccessInvitationResult> Handle(CreateAccessInvitationCommand request, CancellationToken ct)
@@ -88,9 +86,6 @@ public sealed class CreateAccessInvitationCommandHandler(
             // complete enrollment lifecycle (including reinstatement) has its own command.
             if (string.Equals(role, PedagoraPilotRoleCodes.Student, StringComparison.OrdinalIgnoreCase))
             {
-                // Reject invitations that cannot be accepted before publishing their
-                // outbox event; otherwise the staging bypass provisions AuthGate first.
-                await studentMembers.ValidateInvitationCapacityAsync(organizationId, cohort.Id.Value, ct);
                 var person = await persons.GetByEmailAsync(email, false, ct);
                 if (person is not null)
                 {
@@ -130,7 +125,8 @@ public sealed class CreateAccessInvitationCommandHandler(
             ["student"] = PedagoraPilotRoleCodes.Student,
             ["stagiaire"] = PedagoraPilotRoleCodes.Student,
             ["jury"] = PedagoraPilotRoleCodes.Jury,
-            ["readonly"] = PedagoraPilotRoleCodes.ReadOnly
+            ["readonly"] = PedagoraPilotRoleCodes.ReadOnly,
+            ["read_only"] = PedagoraPilotRoleCodes.ReadOnly
         };
         if (roles.TryGetValue(value, out var mapped)) return mapped;
         return PedagoraPilotRoleCodes.All.Contains(value, StringComparer.OrdinalIgnoreCase) &&
