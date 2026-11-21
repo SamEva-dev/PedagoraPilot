@@ -117,7 +117,7 @@ internal static class DeaStructureValidation
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         ValidateUniqueCodes(blocks);
         ValidateUniqueCodes(competencies);
-        ValidateUniqueCodes(modules);
+        ValidateUniqueCodes(modules, "DEA_STRUCTURE_MODULE_CODE_DUPLICATE");
 
         var blockCodes = blocks.Select(RequiredCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var competencyNumbers = new HashSet<int>();
@@ -137,7 +137,9 @@ internal static class DeaStructureValidation
             foreach (var reference in refs.EnumerateArray())
             {
                 if (reference.ValueKind != JsonValueKind.Number || !reference.TryGetInt32(out var number)
-                    || !competencyNumbers.Contains(number) || !assignedNumbers.Add(number))
+                    || !competencyNumbers.Contains(number))
+                    throw new ConflictApplicationException("DEA_STRUCTURE_COMPETENCY_REFERENCE_INVALID");
+                if (!assignedNumbers.Add(number))
                     throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
             }
         }
@@ -217,15 +219,17 @@ internal static class DeaStructureValidation
             throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
         return number;
     }
-    private static void ValidateUniqueCodes(IEnumerable<JsonElement> rows)
+    private static void ValidateUniqueCodes(IEnumerable<JsonElement> rows, string errorCode = "DEA_STRUCTURE_INVALID")
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
             if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("code", out var code)
                 || code.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(code.GetString())
-                || !seen.Add(code.GetString()!))
+                )
                 throw new ConflictApplicationException("DEA_STRUCTURE_INVALID");
+            if (!seen.Add(code.GetString()!))
+                throw new ConflictApplicationException(errorCode);
         }
     }
 }
